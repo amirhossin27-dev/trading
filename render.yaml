@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: amir-trading-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: https://amirhossin27-dev.github.io

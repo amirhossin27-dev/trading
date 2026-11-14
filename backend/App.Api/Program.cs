@@ -1,0 +1,15 @@
+using System.Threading.RateLimiting;
+using Standalone.Api;
+using Standalone.Api.Services;
+var builder=WebApplication.CreateBuilder(args);
+builder.Services.AddMemoryCache();
+var origins=(builder.Configuration["ALLOWED_ORIGINS"] ?? "https://amirhossin27-dev.github.io,http://localhost:5180,http://127.0.0.1:5180,http://localhost:5190,http://127.0.0.1:5190").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries);
+builder.Services.AddCors(options=>options.AddDefaultPolicy(policy=>policy.WithOrigins(origins).WithMethods("GET").AllowAnyHeader()));
+builder.Services.AddRateLimiter(options=> { options.RejectionStatusCode=429; options.AddPolicy("public-data",context=>RateLimitPartition.GetFixedWindowLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "unknown",_=>new FixedWindowRateLimiterOptions {PermitLimit=240,Window=TimeSpan.FromMinutes(1),QueueLimit=0})); });
+builder.Services.AddHttpClient<MarketDataService>(client => {client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; StandaloneApps/1.0)");client.Timeout=TimeSpan.FromSeconds(15);}).ConfigurePrimaryHttpMessageHandler(()=>new HttpClientHandler {AutomaticDecompression=System.Net.DecompressionMethods.All,UseCookies=false});
+var app=builder.Build();
+app.UseCors();
+app.UseRateLimiter();
+app.MapGet("/api/health",()=>Results.Ok(new { status="ok" }));
+app.MapGroup("").RequireRateLimiting("public-data").MapPublicData();
+app.Run();

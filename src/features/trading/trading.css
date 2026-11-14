@@ -1,0 +1,1100 @@
+/* Trading module: chart with indicators and drawing tools on the left, the list of markets with the day change on the right. */
+
+/* The page fills the window; the chart takes what the header and the toolbar leave over. */
+.tr-page {
+  display: flex;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tr-page .mk-card {
+  flex: 1;
+}
+
+@media (min-width: 921px) and (min-height: 700px) {
+  .tr-page {
+    height: calc(100vh - 152px);
+  }
+
+  .tr-page .mk-card {
+    min-height: 0;
+  }
+
+  .tr-page .mk-body {
+    min-height: 240px;
+  }
+}
+
+.mk-card {
+  --trend: var(--accent);
+  --up: var(--success);
+  --down: #dc3545;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+:root[data-theme='dark'] .mk-card {
+  --down: #f06a76;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .mk-card {
+    --down: #f06a76;
+  }
+}
+
+.mk-card.is-up {
+  --trend: var(--up);
+}
+
+.mk-card.is-down {
+  --trend: var(--down);
+}
+
+/* Chart left, watchlist right */
+.mk-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 372px;
+  flex: 1;
+  gap: 20px;
+  min-height: 0;
+}
+
+.mk-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.mk-watch {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-left: 20px;
+  border-left: 1px solid var(--border);
+}
+
+.mk-watch-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.mk-watch-head h3 {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mk-watch-list {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+  margin: 0 -8px;
+  padding: 0 8px;
+  overflow-y: auto;
+}
+
+/* One market per row: round badge, name, price, change, change in % */
+.mk-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.mk-row:hover {
+  background: var(--accent-soft);
+}
+
+/* Reordering by drag and drop: the dragged row fades, a line shows where it lands. */
+.mk-row[draggable='true'] {
+  cursor: grab;
+}
+
+.mk-row.is-dragging {
+  opacity: 0.4;
+}
+
+.mk-row.drop-before {
+  box-shadow: 0 -2px 0 0 var(--accent);
+}
+
+.mk-row.drop-after {
+  box-shadow: 0 2px 0 0 var(--accent);
+}
+
+.mk-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.mk-row.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.mk-row > button[role='tab'] {
+  display: grid;
+  grid-template-columns: 24px minmax(44px, 1fr) auto auto auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 4px 7px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  text-align: left;
+}
+
+.mk-avatar {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mk-row-symbol {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mk-row-price,
+.mk-row-abs,
+.mk-row-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.mk-row-price {
+  min-width: 60px;
+  color: var(--text-strong);
+}
+
+.mk-row-abs {
+  min-width: 44px;
+  font-size: 12px;
+}
+
+.mk-row-pct {
+  min-width: 58px;
+}
+
+.mk-row-abs.is-up, .mk-row-pct.is-up { color: var(--up); }
+.mk-row-abs.is-down, .mk-row-pct.is-down { color: var(--down); }
+.mk-row-abs.is-flat, .mk-row-pct.is-flat { color: var(--text-muted); }
+
+.mk-row-close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  opacity: 0;
+}
+
+.mk-row:hover .mk-row-close,
+.mk-row:focus-within .mk-row-close {
+  opacity: 0.8;
+}
+
+.mk-row-close:hover,
+.mk-row-close:focus-visible {
+  background: color-mix(in srgb, var(--down) 16%, transparent);
+  color: var(--down);
+  opacity: 1;
+}
+
+.mk-row-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* A narrow card: the list becomes a strip above the chart (badge, name, change in %). */
+@container (max-width: 900px) {
+  .mk-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .mk-watch {
+    order: -1;
+    padding: 0 0 12px;
+    border-bottom: 1px solid var(--border);
+    border-left: none;
+  }
+
+  .mk-watch-list {
+    display: flex;
+    gap: 6px;
+    margin: 0;
+    padding: 2px 0 6px;
+    overflow: auto hidden;
+  }
+
+  .mk-row {
+    flex: none;
+    grid-template-columns: auto 22px;
+    border-color: var(--button-border);
+    border-radius: 999px;
+  }
+
+  .mk-row.drop-before {
+    box-shadow: -3px 0 0 0 var(--accent);
+  }
+
+  .mk-row.drop-after {
+    box-shadow: 3px 0 0 0 var(--accent);
+  }
+
+  .mk-row > button[role='tab'] {
+    grid-template-columns: 22px auto auto;
+    gap: 6px;
+    padding: 5px 2px 5px 8px;
+  }
+
+  .mk-avatar {
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+  }
+
+  .mk-row-price,
+  .mk-row-abs {
+    display: none;
+  }
+
+  .mk-row-close {
+    opacity: 0.6;
+  }
+}
+
+.mk-row-close svg,
+.mk-add-button svg,
+.mk-tools svg,
+.mk-menu-button svg,
+.mk-picker svg,
+.mk-zoom svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.mk-add-button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.mk-add-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Pop-ups (market list, indicators) */
+.mk-picker,
+.mk-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.mk-picker {
+  right: 0;
+  display: grid;
+  gap: 8px;
+  width: min(420px, calc(100cqw - 40px));
+  padding: 10px;
+}
+
+.mk-picker-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mk-picker-filters button {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mk-picker-filters button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.mk-picker-list li button small {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mk-picker input {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.mk-picker-note,
+.mk-picker-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mk-picker-list {
+  max-height: 340px;
+  margin: 0 -4px;
+  padding: 0 4px;
+  overflow-y: auto;
+}
+
+.mk-picker-list h3 {
+  margin: 8px 0 4px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mk-picker-list ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-picker-list li button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+
+.mk-picker-list li button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--accent-soft);
+}
+
+.mk-picker-list li button b {
+  min-width: 56px;
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.mk-picker-list li button span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mk-picker-list li button svg {
+  width: 16px;
+  height: 16px;
+  color: var(--accent-strong);
+}
+
+/* Header: name on the left, price on the right */
+.mk-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 14px;
+}
+
+.mk-head h2 {
+  color: var(--text-strong);
+}
+
+.mk-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.mk-price {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mk-price strong {
+  color: var(--text-strong);
+  font-size: 30px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+/* Toolbar: chart type, time unit, indicators, drawing tools */
+.mk-toolbar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.mk-seg {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--button-border);
+  border-radius: 999px;
+  background: var(--panel-muted);
+}
+
+.mk-seg button {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mk-seg button.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.mk-units {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mk-units button {
+  padding: 6px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mk-units button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.mk-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 50%, transparent);
+  animation: mk-pulse 2s infinite;
+}
+
+.mk-live-dot.is-closed {
+  background: var(--text-muted);
+  animation: none;
+}
+
+@keyframes mk-pulse {
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-live-dot { animation: none; }
+}
+
+.mk-market-state {
+  color: var(--text-muted);
+  text-transform: none;
+}
+
+.mk-change {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--trend) 14%, transparent);
+  color: var(--trend);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  padding: 4px 9px;
+}
+
+.mk-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mk-menu-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.mk-menu-button.has-value {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.mk-menu-button b {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.mk-popover {
+  right: 0;
+  display: grid;
+  gap: 2px;
+  min-width: 210px;
+  padding: 6px;
+}
+
+.mk-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mk-check:hover {
+  background: var(--accent-soft);
+}
+
+.mk-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.mk-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.mk-tools {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-self: flex-start;
+  gap: 4px;
+}
+
+.mk-tools button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+}
+
+.mk-tools button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.mk-tools svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mk-hint {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Chart */
+.mk-menu {
+  margin-left: auto;
+}
+
+.mk-body {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-height: 340px;
+}
+
+.mk-stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.mk-chart {
+  position: absolute;
+  inset: 0;
+  color: var(--trend);
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.mk-chart-focus {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+}
+
+.mk-chart-focus:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mk-chart svg.mk-svg,
+.mk-chart-focus > svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+}
+
+.mk-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.mk-grid {
+  stroke: var(--border);
+  stroke-dasharray: 3 4;
+  stroke-width: 1;
+}
+
+.mk-grid.is-vertical {
+  opacity: 0.55;
+}
+
+.mk-axis-text {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.mk-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.mk-candle line {
+  stroke: var(--up);
+  stroke-width: 1;
+}
+
+.mk-candle rect {
+  fill: var(--up);
+}
+
+.mk-candle.is-down line {
+  stroke: var(--down);
+}
+
+.mk-candle.is-down rect {
+  fill: var(--down);
+}
+
+.mk-overlay {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.mk-band {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+
+.mk-band-fill {
+  fill: var(--text-muted);
+  opacity: 0.09;
+}
+
+.mk-vol.is-up {
+  fill: var(--up);
+  opacity: 0.5;
+}
+
+.mk-vol.is-down {
+  fill: var(--down);
+  opacity: 0.5;
+}
+
+.mk-rsi-level {
+  stroke: var(--border);
+  stroke-dasharray: 3 4;
+}
+
+.mk-panel-line {
+  stroke: var(--border);
+}
+
+.mk-panel-label {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mk-panel-value {
+  fill: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-badge rect {
+  fill: var(--text-muted);
+}
+
+.mk-badge text {
+  fill: #ffffff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.mk-last {
+  color: var(--trend);
+}
+
+.mk-last.is-up { color: var(--up); }
+.mk-last.is-down { color: var(--down); }
+
+.mk-last line {
+  stroke: currentColor;
+  stroke-dasharray: 2 3;
+  opacity: 0.75;
+}
+
+.mk-cross line {
+  stroke: var(--text-muted);
+  stroke-dasharray: 3 3;
+  opacity: 0.8;
+}
+
+.mk-hit {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+.mk-chart.is-panning .mk-hit {
+  cursor: grabbing;
+}
+
+.mk-drawing line {
+  stroke: var(--accent);
+  stroke-width: 1.6;
+}
+
+.mk-drawing circle {
+  fill: var(--panel);
+  stroke: var(--accent);
+  stroke-width: 1.6;
+}
+
+.mk-drawing.is-selected line {
+  stroke-width: 2.4;
+}
+
+.mk-drawing.is-preview {
+  opacity: 0.7;
+}
+
+.mk-drawing.is-fib line {
+  stroke: #f59f00;
+  stroke-width: 1;
+}
+
+.mk-drawing.is-fib circle {
+  stroke: #f59f00;
+}
+
+.mk-drawing.is-fib line.mk-fib-guide {
+  stroke-dasharray: 4 4;
+}
+
+.mk-fib-label {
+  fill: var(--text);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3px;
+}
+
+.mk-measure.is-up { color: var(--up); }
+.mk-measure.is-down { color: var(--down); }
+
+.mk-measure line {
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.mk-measure-area {
+  fill: currentColor;
+  opacity: 0.13;
+}
+
+.mk-measure-box {
+  fill: currentColor;
+}
+
+.mk-measure text {
+  fill: #ffffff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.mk-remove {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: 0 0 0 -11px;
+  padding: 0;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--down);
+  box-shadow: var(--shadow);
+  color: #ffffff;
+}
+
+.mk-remove:hover {
+  border-color: var(--bg);
+  filter: brightness(1.1);
+}
+
+.mk-remove svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 2.2;
+}
+
+.mk-legend {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  display: grid;
+  gap: 2px;
+  max-width: calc(100% - 150px);
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.mk-legend-main,
+.mk-legend-indicators {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.mk-legend b {
+  color: var(--text);
+}
+
+.mk-legend i {
+  color: var(--text-strong);
+  font-style: normal;
+}
+
+.mk-legend .is-up { color: var(--up); }
+.mk-legend .is-down { color: var(--down); }
+
+.mk-legend-indicators i {
+  color: inherit;
+}
+
+.mk-zoom {
+  position: absolute;
+  top: 4px;
+  right: 70px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.mk-chart:hover .mk-zoom,
+.mk-zoom:focus-within {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .mk-zoom {
+    opacity: 1;
+  }
+}
+
+.mk-zoom button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.mk-zoom svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mk-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-top: 8px;
+}
+
+.mk-foot small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  /* Phone: the legend only keeps date, close and change so that it does not cover the chart. */
+  .mk-legend {
+    max-width: calc(100% - 120px);
+  }
+
+  .mk-ohl,
+  .mk-legend-indicators {
+    display: none;
+  }
+
+  .mk-body {
+    flex-direction: column;
+  }
+
+  .mk-tools {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .mk-stage {
+    min-height: 320px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-zoom {
+    transition: none;
+  }
+}
+
+/* Toolbars can add rows without compressing the chart or watchlist. */
+@media (min-width: 921px) and (min-height: 700px) {
+  .tr-page {
+    height: auto;
+    min-height: calc(100dvh - 152px);
+  }
+}
+
+.mk-seg {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.mk-watch {
+  min-width: 0;
+}
