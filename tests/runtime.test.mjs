@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readViewOptions, resolveApiUrl, validFrameMessage } from '../src/runtime.mjs';
+import { readViewOptions, resolveApiUrl, validFrameMessage, readSetting, writeSetting } from '../src/runtime.mjs';
 
 test('standalone stays full; embedded compact mode has an explicit parent', () => {
  assert.deepEqual(readViewOptions('https://example.com/live-scores/'), {embedded:false,compact:false,language:'de',theme:'auto',parentOrigin:null});
@@ -20,4 +20,11 @@ test('API URL preserves configured prefix and rejects insecure production endpoi
 test('frame size messages are bounded and have a strict protocol', () => {
  assert.equal(validFrameMessage({type:'standalone-app:resize',height:850}),true);
  for(const value of [{type:'other',height:850},{type:'standalone-app:resize',height:999999},{type:'standalone-app:resize',height:'850'},null]) assert.equal(validFrameMessage(value),false);
+});
+
+test('blocked browser storage keeps usable defaults instead of crashing the app', () => {
+ const previous=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
+ Object.defineProperty(globalThis,'localStorage',{configurable:true,get(){throw new Error('Storage blocked')}});
+ try {assert.equal(readSetting('theme','auto',['auto','dark','light']),'auto');assert.doesNotThrow(()=>writeSetting('theme','dark'));}
+ finally {if(previous)Object.defineProperty(globalThis,'localStorage',previous);else delete globalThis.localStorage;}
 });

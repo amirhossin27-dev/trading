@@ -15,3 +15,6 @@ export function resolveApiUrl(base, path) {
 export function validFrameMessage(value) {
  return value !== null && typeof value === 'object' && value.type === 'standalone-app:resize' && Number.isFinite(value.height) && value.height >= 240 && value.height <= 2200;
 }
+
+export function readSetting(key,fallback,allowed) { try { const value=globalThis.localStorage.getItem(key); return allowed.includes(value)?value:fallback; } catch { return fallback; } }
+export function writeSetting(key,value) { try { globalThis.localStorage.setItem(key,value); } catch { /* Session state still works when storage is blocked. */ } }

@@ -2,18 +2,18 @@ import { useEffect, useState } from 'react'
 import { Trading } from './features/trading/Trading'
 import { TradingTile } from './features/overview/TradingTile'
 import { apiBaseUrl } from './services/platformApi'
-import { readViewOptions } from './runtime.mjs'
+import { readViewOptions, readSetting, writeSetting } from './runtime.mjs'
 import type { Language } from './types/platform'
 import './app.css'
 const options = readViewOptions(window.location.href)
 export function App() {
  const { embedded,compact } = options
- const [language,setLanguage] = useState<Language>(()=>embedded ? options.language : localStorage.getItem('trading.language') === 'en' ? 'en' : 'de')
- const [theme,setTheme] = useState(()=>embedded ? options.theme : localStorage.getItem('trading.theme') || 'auto')
+ const [language,setLanguage] = useState<Language>(()=>embedded ? options.language : readSetting('trading.language','de',['de','en']))
+ const [theme,setTheme] = useState(()=>embedded ? options.theme : readSetting('trading.theme','auto',['auto','dark','light']))
  const [help,setHelp] = useState(false)
  const de = language === 'de'
- useEffect(()=>{document.documentElement.lang=language; if(!embedded)localStorage.setItem('trading.language',language)},[language,embedded])
- useEffect(()=>{if(theme==='auto')delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=theme; if(!embedded)localStorage.setItem('trading.theme',theme)},[theme,embedded])
+ useEffect(()=>{document.documentElement.lang=language; if(!embedded)writeSetting('trading.language',language)},[language,embedded])
+ useEffect(()=>{if(theme==='auto')delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=theme; if(!embedded)writeSetting('trading.theme',theme)},[theme,embedded])
  useEffect(()=>{
   if(!embedded || !options.parentOrigin || window.parent===window)return
   // Referrer must agree with the explicitly supplied parent. No wildcard messages.
