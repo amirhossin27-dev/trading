@@ -1,0 +1,219 @@
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { PriceChart } from './PriceChart'
+import { tradingCopy } from './tradingCopy'
+import type { Tool } from './PriceChart'
+
+const candles = Array.from({ length: 100 }, (_, i) => ({
+  t: Date.UTC(2026, 0, 1) + i * 60_000,
+  o: 100 + i, h: 102 + i, l: 99 + i, c: 101 + i, v: 100,
+}))
+
+beforeEach(() => {
+  // jsdom has no native PointerEvent; preserve the browser event fields used by the real chart.
+  vi.stubGlobal('PointerEvent', class extends MouseEvent {
+    readonly pointerId: number
+    readonly pointerType: string
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init)
+      this.pointerId = init.pointerId ?? 0
+      this.pointerType = init.pointerType ?? 'mouse'
+    }
+  })
+})
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+function setup(tool: Tool = 'cursor', data = candles) {
+  const onDrawingsChange = vi.fn()
+  const onToolChange = vi.fn()
+  const props = { candles: data, kind: 'candles' as const, visible: 80, intervalMs: 60_000,
+    indicators: [], hasVolume: true, drawings: [], onDrawingsChange, tool, onToolChange,
+    locale: 'en-US', labels: tradingCopy('en').chart }
+  const rendered = render(<PriceChart {...props} />)
+  const hit = () => document.querySelector('.mk-hit')!
+  const touch = (type: 'pointerDown' | 'pointerMove' | 'pointerUp' | 'pointerCancel' | 'lostPointerCapture', id: number, x: number, y = 100) =>
+    fireEvent[type](hit(), { pointerId: id, pointerType: 'touch', button: 0, clientX: x, clientY: y })
+  const rects = () => Array.from(document.querySelectorAll('.mk-candle rect'))
+  const width = () => Number(rects()[0]?.getAttribute('width'))
+  const picture = () => document.querySelector('.mk-layer')?.innerHTML
+  return { ...rendered, props, touch, rects, width, picture, onDrawingsChange, onToolChange, hit }
+}
+
+describe('PriceChart gestures', () => {
+  it.each(['trend', 'fib', 'measure'] as const)('shows a live %s preview before committing a touch drawing', (tool) => {
+    const chart = setup(tool)
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerMove', 1, 300, 140)
+    expect(document.querySelector(tool === 'measure' ? '.mk-measure' : '.mk-drawing.is-preview')).not.toBeNull()
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+    chart.touch('pointerCancel', 1, 300, 140)
+    expect(document.querySelector('.mk-drawing.is-preview,.mk-measure')).toBeNull()
+  })
+
+  it('cancels a pinch when the SVG origin changes instead of mixing old and new coordinates', () => {
+    const chart = setup()
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerDown', 2, 462)
+    const before = chart.picture()
+    const svg = document.querySelector('.mk-chart-focus > svg')!
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 0, right: 820, bottom: 340, width: 720, height: 340, x: 100, y: 0, toJSON: () => ({}) })
+    chart.touch('pointerMove', 1, 201)
+    chart.touch('pointerMove', 2, 463)
+    expect(chart.picture()).toBe(before)
+    expect(document.querySelector('.mk-chart.is-panning')).toBeNull()
+  })
+
+  it('cancels active pointers when the chart is resized', () => {
+    let report: ResizeObserverCallback
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { report = callback }
+      observe() {}
+      disconnect() {}
+    })
+    const chart = setup()
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerDown', 2, 462)
+    act(() => report([{ contentRect: { width: 600, height: 300 } } as ResizeObserverEntry], {} as ResizeObserver))
+    const resized = chart.picture()
+    chart.touch('pointerMove', 1, 201)
+    chart.touch('pointerMove', 2, 463)
+    expect(chart.picture()).toBe(resized)
+    expect(document.querySelector('.mk-chart.is-panning')).toBeNull()
+  })
+
+
+  it('zooms around the two-finger midpoint and reverses without changing the app', () => {
+    const chart = setup()
+    const originalWidth = chart.width()
+    const originalPicture = chart.picture()
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerDown', 2, 462)
+    chart.touch('pointerMove', 1, 69)
+    chart.touch('pointerMove', 2, 593)
+    expect(chart.width()).toBeCloseTo(originalWidth * 2)
+    // Candles 60 and 61 straddle x=331 before and after zoom. After zoom the first rendered index is 40.
+    const center = (node: Element) => Number(node.getAttribute('x')) + Number(node.getAttribute('width')) / 2
+    expect((center(chart.rects()[20]) + center(chart.rects()[21])) / 2).toBeCloseTo(331)
+    chart.touch('pointerMove', 1, 200)
+    chart.touch('pointerMove', 2, 462)
+    expect(chart.picture()).toBe(originalPicture)
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+  })
+
+  it('continues panning after lifting one finger without jumping or changing zoom', () => {
+    const chart = setup()
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerDown', 2, 462)
+    chart.touch('pointerMove', 1, 69)
+    chart.touch('pointerMove', 2, 593)
+    const pinched = chart.picture()
+    const zoomedWidth = chart.width()
+    chart.touch('pointerUp', 2, 593)
+    expect(chart.picture()).toBe(pinched)
+    chart.touch('pointerMove', 1, 99)
+    expect(chart.width()).toBeCloseTo(zoomedWidth)
+    expect(chart.picture()).not.toBe(pinched)
+    chart.touch('pointerUp', 1, 99)
+    const finished = chart.picture()
+    chart.touch('pointerMove', 1, 150)
+    expect(chart.picture()).toBe(finished)
+  })
+
+  it.each(['pointerCancel', 'lostPointerCapture'] as const)('ends a gesture on %s without drawing or leaving a stuck drag', (event) => {
+    const chart = setup('trend')
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerMove', 1, 260, 140)
+    chart.touch(event, 1, 260, 140)
+    chart.touch('pointerUp', 1, 280, 160)
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+    expect(document.querySelector('.mk-chart.is-panning')).toBeNull()
+    chart.touch('pointerDown', 3, 300)
+    chart.touch('pointerUp', 3, 300)
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+  })
+
+  it('does not turn a pinch into a horizontal line; a deliberate single tap still draws', () => {
+    const chart = setup('hline')
+    chart.touch('pointerDown', 1, 200)
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+    chart.touch('pointerDown', 2, 462)
+    chart.touch('pointerMove', 2, 550)
+    chart.touch('pointerUp', 2, 550)
+    chart.touch('pointerUp', 1, 200)
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+    chart.touch('pointerDown', 3, 300)
+    chart.touch('pointerUp', 3, 300)
+    expect(chart.onDrawingsChange).toHaveBeenCalledOnce()
+    expect(chart.onDrawingsChange.mock.calls[0][0][0].kind).toBe('hline')
+  })
+
+  it('keeps touch drawing by dragging and by two separate taps', () => {
+    const chart = setup('trend')
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerMove', 1, 300, 140)
+    chart.touch('pointerUp', 1, 300, 140)
+    expect(chart.onDrawingsChange).toHaveBeenCalledOnce()
+    expect(chart.onDrawingsChange.mock.calls[0][0][0].kind).toBe('trend')
+    chart.onDrawingsChange.mockClear()
+    chart.touch('pointerDown', 2, 240)
+    chart.touch('pointerUp', 2, 240)
+    chart.touch('pointerDown', 3, 320, 160)
+    chart.touch('pointerUp', 3, 320, 160)
+    expect(chart.onDrawingsChange).toHaveBeenCalledOnce()
+  })
+
+  it('ignores a third finger and remains bounded for extreme pinch distances', () => {
+    const chart = setup()
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerDown', 2, 462)
+    const beforeThird = chart.picture()
+    chart.touch('pointerDown', 3, 600)
+    chart.touch('pointerMove', 3, 650)
+    expect(chart.picture()).toBe(beforeThird)
+    chart.touch('pointerMove', 2, 50_000)
+    expect(chart.rects().length).toBeLessThanOrEqual(11)
+    expect(chart.width()).toBeGreaterThan(0)
+    chart.touch('pointerMove', 2, 200)
+    expect(chart.width()).toBeGreaterThan(0)
+    expect(chart.picture()).not.toContain('NaN')
+  })
+
+  it('cancels touch state when changing tools or mounting another market', () => {
+    const chart = setup()
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerDown', 2, 462)
+    chart.rerender(<PriceChart {...chart.props} tool="trend" />)
+    const afterTool = chart.picture()
+    chart.touch('pointerMove', 2, 600)
+    expect(chart.picture()).toBe(afterTool)
+    chart.rerender(<PriceChart key="other-market" {...chart.props} />)
+    const other = chart.picture()
+    chart.touch('pointerMove', 1, 400)
+    expect(chart.picture()).toBe(other)
+  })
+
+  it.each([0, 1])('ignores gestures with only %s data points', (count) => {
+    const chart = setup('hline', candles.slice(0, count))
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerDown', 2, 462)
+    chart.touch('pointerMove', 2, 600)
+    chart.touch('pointerUp', 2, 600)
+    chart.touch('pointerUp', 1, 200)
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+  })
+
+  it('retains wheel zoom, mouse pan and the reset button', () => {
+    const chart = setup()
+    const original = chart.picture()
+    fireEvent.wheel(chart.hit(), { deltaY: -100, clientX: 331 })
+    expect(chart.picture()).not.toBe(original)
+    fireEvent.click(screen.getByRole('button', { name: 'Reset view' }))
+    expect(chart.picture()).toBe(original)
+    fireEvent.pointerDown(chart.hit(), { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 250, clientY: 100 })
+    fireEvent.pointerMove(chart.hit(), { pointerId: 1, pointerType: 'mouse', clientX: 300, clientY: 100 })
+    fireEvent.pointerUp(chart.hit(), { pointerId: 1, pointerType: 'mouse', clientX: 300, clientY: 100 })
+    expect(chart.picture()).not.toBe(original)
+    fireEvent.click(screen.getByRole('button', { name: 'Reset view' }))
+    expect(chart.picture()).toBe(original)
+  })
+})

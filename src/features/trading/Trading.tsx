@@ -386,10 +386,6 @@ export function Trading({ language }: { language: Language }) {
               </div>
             </div>
 
-            <div className="mk-foot">
-              <small>{t.noTrading}</small>
-              {series && <small>{t.source}: {series.source}</small>}
-            </div>
           </div>
 
           <aside className="mk-watch">

@@ -73,19 +73,19 @@
 
 ## Etappe 2 – Chart-Zoom und App-Gesten
 
-**Priorität:** sofort, nach CP1. **Dateien:** src/features/trading/PriceChart.tsx, trading.css, src/app.css; neue src/features/trading/PriceChart.test.tsx; bei Bedarf klar abgegrenzte chartGestures.ts mit eigener Testdatei.
+**Priorität:** sofort; Fortsetzung trotz offener Abstands-Nachbesserung vom Nutzer ausdrücklich freigegeben. **Dateien:** src/features/trading/PriceChart.tsx, trading.css, src/app.css; neue src/features/trading/PriceChart.test.tsx; bei Bedarf klar abgegrenzte chartGestures.ts mit eigener Testdatei.
 **Schnittstelle:** vorhandene View {count, shift}, Zoomgrenzen, Zeichnungen und Chart-Props behalten.
 
 **Vorgeschlagenes Verhalten:** Zwei Finger im Chart zoomen um ihren Mittelpunkt; ein Finger verschiebt den Chart im Cursor-Modus; Zeichnen ist ein ausdrücklicher Werkzeugmodus. Außerhalb des Charts scrollt die Seite normal. App-weites Pinch-/Doppeltipp-Vergrößern durch normale Touch-Bedienung unterbinden, entsprechend dem Nutzerwunsch.
 
-- [ ] Vor Änderung Tests für zwei Pointer und Mittelpunktanker schreiben und ihr Scheitern nachweisen.
-- [ ] Aktive Pointer getrennt erfassen; aus Ausgangsabstand und Ausgangsansicht den Zoom berechnen; Grenzen des vorhandenen Charts beachten.
-- [ ] Pan/Pinch/Zeichnen gegenseitig abgrenzen; zweiter Finger darf keine Zeichnung auslösen; pointercancel und lostpointercapture setzen die Geste sauber zurück.
-- [ ] Touch-Regeln für Chart und übrige App zentral festlegen. Scrollen außerhalb des Charts und in Suchlisten erhalten; Querformat einbeziehen.
-- [ ] Vorhandene Plus/Minus/Reset-Tasten mobil sichtbar und mit mindestens 44px Trefffläche anbieten.
-- [ ] Verhalten prüfen: Pinch hinein/heraus, keine Sprünge beim Fingerwechsel, Zoomgrenzen, 0/1 Datenpunkt, Marktwechsel während Geste, kein versehentliches Löschen/Zeichnen, Maus/Tastatur weiterhin nutzbar.
+- [x] Vor Änderung Tests für zwei Pointer und Mittelpunktanker schreiben und ihr Scheitern nachweisen.
+- [x] Aktive Pointer getrennt erfassen; aus Ausgangsabstand und Ausgangsansicht den Zoom berechnen; Grenzen des vorhandenen Charts beachten.
+- [x] Pan/Pinch/Zeichnen gegenseitig abgrenzen; zweiter Finger darf keine Zeichnung auslösen; pointercancel und lostpointercapture setzen die Geste sauber zurück.
+- [x] Touch-Regeln für Chart und übrige App zentral festlegen. Scrollen außerhalb des Charts und in Suchlisten erhalten; Querformat einbeziehen.
+- [x] Vorhandene Plus/Minus/Reset-Tasten mobil sichtbar und mit mindestens 44px Trefffläche anbieten.
+- [x] Verhalten prüfen: Pinch hinein/heraus, keine Sprünge beim Fingerwechsel, Zoomgrenzen, 0/1 Datenpunkt, Marktwechsel während Geste, kein versehentliches Löschen/Zeichnen, Maus/Tastatur weiterhin nutzbar.
 - [ ] Auf echtem iPhone prüfen, dass Header und App-Schrift beim Chart-Pinch gleich groß bleiben und normales Scrollen funktioniert.
-- [ ] Pflichtprüfungen ausführen.
+- [x] Pflichtprüfungen ausführen.
 
 **Checkpoint CP2:** Chart reagiert auf Zwei-Finger-Zoom; App bleibt bei den getesteten Touch-Gesten unvergrößert. Reset funktioniert und keine Geste hängt fest.
 
@@ -152,8 +152,8 @@
 | Checkpoint | Status | Nachweis / nächste Aktion |
 | --- | --- | --- |
 | CP0 Analyse und Planentwurf | abgeschlossen | Code und mobile Browseransicht geprüft; Nutzer nutzt Home-Bildschirm |
-| CP1 Kopfbereich | lokal umgesetzt; Geräteabnahme offen | 70 Tests und beide Builds erfolgreich; Veröffentlichung und iPhone-Test als Nächstes |
-| CP2 Gesten | offen | nach CP1 |
+| CP1 Kopfbereich | Nachbesserung umgesetzt; Geräteabnahme offen | Nutzer wünscht mehr Abstand: Zusatzabstand jetzt 32px; vier Hinweise entfernt |
+| CP2 Gesten | umgesetzt und geprüft; Geräteabnahme offen | Fortsetzung vom Nutzer freigegeben; Pinch/Pan/Abbruch geprüft; 86 Tests und Builds erfolgreich |
 | CP3 Übersicht | offen | Vorschau vor Umsetzung |
 | CP4 Suche/Watchlist | offen | nach CP3 |
 | CP5 Datenverständlichkeit | offen | nach CP2 vorziehbar |
@@ -169,3 +169,16 @@ Nach jeder Etappe ergänzen: Datum, Branch/Commit, betroffene Dateien, ausgefüh
 - Safe Areas: https://webkit.org/blog/7929/designing-websites-for-iphone-x/
 - Pinch-Gesten: https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events/Pinch_zoom_gestures
 - iOS-Grenzen der Viewport-Zoomangaben: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/meta/name/viewport
+
+Aktueller Arbeitsstand (15.11.2026): Commit 430ff05f70cbfabacc5a7073415313727022c22d auf codex/iphone-header in app/. Arbeitsbaum sauber. Veröffentlichung am 15.11.2026 ausdrücklich freigegeben und nach main übertragen. GitHub-Pages-Deployment erfolgreich. Nächste Aktion: Nutzerprüfung auf dem iPhone 15 über das Home-Bildschirm-Symbol.
+
+Veröffentlichungsnachweis (15.11.2026):
+- Commit: 430ff05f70cbfabacc5a7073415313727022c22d.
+- GitHub Actions: https://github.com/amirhossin27-dev/trading/actions/runs/43715225036 – completed / success.
+- Live-App: https://amirhossin27-dev.github.io/trading/
+- Live-Browserprüfung 393px: CSS index-DnXMUV0c.css; Top-Padding 16px bei Safe-Area 0; Header-Tasten mindestens 44 × 44px; kein horizontaler Überlauf.
+- Prüfungen vor Veröffentlichung erneut erfolgreich: 5 Node-Tests + 65 Vitest-Tests, npm run build, dotnet build backend/App.Api -c Release.
+- CP1 bleibt bis Rückmeldung des Nutzers vom echten Gerät offen. Keine Arbeit an Etappe 2 begonnen.
+- Die Plandatei im Git-Commit beschreibt den Stand vor Veröffentlichung; beim nächsten Arbeitsbranch diesen aktuellen lokalen Fortschrittsstand übernehmen.
+
+Fortsetzung 15.11.2026: Nutzer meldet Header zu hoch und wünscht Entfernen der vier Footer-Hinweise; Fortsetzung mit Etappe 2 freigegeben. Umsetzung und Prüfungen siehe docs/reviews/2026-11-15-chart-gestures.md. CP1/CP2 bleiben für echte Geräteabnahme offen. Noch keine Umsetzung der späteren Layout-/Such-/Datenstatus-Etappen.

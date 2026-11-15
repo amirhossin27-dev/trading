@@ -51,12 +51,10 @@ const copy = {
       noVolume: 'Diese Quelle liefert kein Volumen.',
       units: { day: 'T', hour: 'Std', minute: 'Min' },
     },
-    source: 'Quelle',
     loading: 'Kurs wird geladen …',
     loadError: 'Der Kurs konnte nicht geladen werden.',
     retry: 'Erneut versuchen',
     chartLabel: (name: string) => `Kursverlauf ${name}`,
-    noTrading: 'Reine Kursanzeige: Hier wird nichts gehandelt.',
   },
   en: {
     eyebrow: 'Live prices',
@@ -108,12 +106,10 @@ const copy = {
       noVolume: 'This source provides no volume.',
       units: { day: 'd', hour: 'h', minute: 'min' },
     },
-    source: 'Source',
     loading: 'Loading price …',
     loadError: 'The price could not be loaded.',
     retry: 'Try again',
     chartLabel: (name: string) => `${name} price history`,
-    noTrading: 'Prices only: nothing is traded here.',
   },
 }
 

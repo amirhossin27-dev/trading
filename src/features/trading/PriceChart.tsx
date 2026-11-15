@@ -278,12 +278,25 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   const [lastTool, setLastTool] = useState(tool)
   const panRef = useRef<{ x: number; shift: number } | null>(null)
   const downRef = useRef<{ x: number; y: number } | null>(null)
+  const touchesRef = useRef(new Map<number, { x: number; y: number }>())
+  const multiTouchRef = useRef(false)
+  const touchPendingRef = useRef<Pending | null>(null)
+  const touchBoxRef = useRef<DOMRect | null>(null)
+  const pinchRef = useRef<{ distance: number; x: number; count: number; shift: number; plotW: number } | null>(null)
 
   // A half-finished drawing and the ruler disappear when another tool is chosen.
   if (lastTool !== tool) {
     setLastTool(tool)
     setPending(null)
     setMeasure(null)
+    touchesRef.current.clear()
+    pinchRef.current = null
+    multiTouchRef.current = false
+    touchPendingRef.current = null
+    touchBoxRef.current = null
+    panRef.current = null
+    downRef.current = null
+    setPanning(false)
   }
 
   const count = candles.length
@@ -314,6 +327,10 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
+
+  useEffect(() => {
+    if (touchesRef.current.size || panRef.current) cancelInteraction()
+  }, [size.w, size.h])
 
   // ---- geometry ----
   const panels: Array<{ id: 'volume' | 'rsi'; top: number; height: number }> = []
@@ -433,9 +450,73 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     setSelectedId(created.id)
   }
 
+  function capture(event: PointerEvent<SVGRectElement>, release = false) {
+    try {
+      if (release) event.currentTarget.releasePointerCapture(event.pointerId)
+      else event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // Capture is unavailable in some hosts; interaction still works inside the chart.
+    }
+  }
+
+  function beginPinch() {
+    const [a, b] = [...touchesRef.current.values()]
+    if (!a || !b) return
+    pinchRef.current = { distance: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)), x: (a.x + b.x) / 2, count: viewCount, shift, plotW }
+  }
+
+  function handleCancel(event: PointerEvent<SVGRectElement>) {
+    // A normal release also dispatches lostpointercapture, after this pointer was removed.
+    if (event.pointerType === 'touch' && !touchesRef.current.has(event.pointerId)) return
+    cancelInteraction()
+  }
+
+  function cancelInteraction() {
+    touchesRef.current.clear()
+    pinchRef.current = null
+    multiTouchRef.current = false
+    touchPendingRef.current = null
+    touchBoxRef.current = null
+    panRef.current = null
+    downRef.current = null
+    setPending(null)
+    setPanning(false)
+    setPointer(null)
+    setHover(null)
+  }
+
   function handleDown(event: PointerEvent<SVGRectElement>) {
-    if (event.button !== 0 || count < 2) return
+    if ((event.pointerType !== 'touch' && event.button !== 0) || count < 2) return
     const point = localPoint(event)
+    if (event.pointerType === 'touch') {
+      capture(event)
+      if (!touchesRef.current.size) touchBoxRef.current = svgRef.current?.getBoundingClientRect() ?? null
+      touchesRef.current.set(event.pointerId, point)
+      if (touchesRef.current.size >= 2) {
+        if (touchesRef.current.size === 2) beginPinch()
+        multiTouchRef.current = true
+        touchPendingRef.current = null
+        panRef.current = null
+        downRef.current = null
+        setPending(null)
+        setMeasure(null)
+        setSelectedId(null)
+        setPointer(null)
+        setHover(null)
+        setPanning(true)
+        return
+      }
+      // Touch drawings commit on release, so a second finger can safely start zooming.
+      if (tool !== 'cursor') {
+        downRef.current = point
+        touchPendingRef.current = activePending
+        if (tool !== 'hline' && !activePending && point.y >= PAD_T && point.y <= PAD_T + mainH) {
+          setMeasure(null)
+          setPending({ tool, a: anchorAt(point) })
+        }
+        return
+      }
+    }
     downRef.current = point
     const inMain = point.y >= PAD_T && point.y <= PAD_T + mainH
 
@@ -445,11 +526,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
       if (!hit) {
         panRef.current = { x: point.x, shift }
         setPanning(true)
-        try {
-          event.currentTarget.setPointerCapture(event.pointerId)
-        } catch {
-          // Without capture the drag still works while the pointer stays over the chart.
-        }
+        capture(event)
       }
       return
     }
@@ -479,6 +556,28 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   function handleMove(event: PointerEvent<SVGRectElement>) {
     if (count < 2) return
     const point = localPoint(event)
+    if (event.pointerType === 'touch') {
+      if (!touchesRef.current.has(event.pointerId)) return
+      const box = svgRef.current?.getBoundingClientRect()
+      const startBox = touchBoxRef.current
+      if (box && startBox && (box.left !== startBox.left || box.top !== startBox.top || box.width !== startBox.width || box.height !== startBox.height)) {
+        cancelInteraction()
+        return
+      }
+      touchesRef.current.set(event.pointerId, point)
+      const pinch = pinchRef.current
+      if (pinch) {
+        const [a, b] = [...touchesRef.current.values()]
+        if (!a || !b) return
+        if (pinch.plotW !== plotW) { cancelInteraction(); return }
+        const distance = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y))
+        const nextCount = clamp(pinch.count * pinch.distance / distance, MIN_COUNT, count + 10)
+        const focus = count + MARGIN - pinch.shift - pinch.count + (pinch.x - PAD_L) / plotW * pinch.count
+        const nextFrom = focus - ((a.x + b.x) / 2 - PAD_L) / plotW * nextCount
+        setViewClamped({ count: nextCount, shift: count + MARGIN - nextFrom - nextCount })
+        return
+      }
+    }
     setPointer(point)
     setHover(hoverIndexAt(point.x))
     if (panRef.current) setViewClamped({ count: viewCount, shift: panRef.current.shift + (point.x - panRef.current.x) / step })
@@ -486,14 +585,56 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
 
   function handleUp(event: PointerEvent<SVGRectElement>) {
     const point = localPoint(event)
+    if (event.pointerType === 'touch') {
+      if (!touchesRef.current.delete(event.pointerId)) return
+      if (multiTouchRef.current) {
+        downRef.current = null
+        pinchRef.current = null
+        panRef.current = null
+        if (touchesRef.current.size >= 2) beginPinch()
+        else {
+          const [remaining] = touchesRef.current.values()
+          if (remaining && tool === 'cursor') panRef.current = { x: remaining.x, shift }
+          setPanning(Boolean(remaining && tool === 'cursor'))
+          if (!remaining) multiTouchRef.current = false
+        }
+        capture(event, true)
+        return
+      }
+      const down = downRef.current
+      const previousPending = touchPendingRef.current
+      touchPendingRef.current = null
+      touchBoxRef.current = null
+      downRef.current = null
+      panRef.current = null
+      setPanning(false)
+      setPointer(null)
+      setHover(null)
+      capture(event, true)
+      if (!down || tool === 'cursor' || count < 2) return
+      if (down.y < PAD_T || down.y > PAD_T + mainH || point.y < PAD_T || point.y > PAD_T + mainH) return
+      const anchor = anchorAt(point)
+      if (tool === 'hline') {
+        const created: Drawing = { id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, kind: 'hline', t1: anchor.t, p1: anchor.p, t2: anchor.t, p2: anchor.p }
+        onDrawingsChange([...drawings, created])
+        setSelectedId(created.id)
+        onToolChange('cursor')
+      } else if (previousPending || Math.hypot(point.x - down.x, point.y - down.y) > 8) {
+        const a = previousPending?.a ?? anchorAt(down)
+        if (tool === 'measure') {
+          setMeasure({ a, b: anchor })
+          setPending(null)
+        } else finishDrawing(tool, a, anchor)
+      } else {
+        setMeasure(null)
+        setPending({ tool, a: anchor })
+      }
+      return
+    }
     if (panRef.current) {
       panRef.current = null
       setPanning(false)
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId)
-      } catch {
-        // Nothing was captured.
-      }
+      capture(event, true)
     }
     // Press, drag and release also draws a line (besides two separate clicks).
     const down = downRef.current
@@ -715,7 +856,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
             {measureLayer}
           </g>
 
-          <rect className="mk-hit" x={PAD_L} y={0} width={plotW} height={plotBottom} onPointerDown={handleDown} onPointerMove={handleMove} onPointerUp={handleUp} onPointerCancel={handleUp} onPointerLeave={handleLeave} onDoubleClick={() => { if (tool === 'cursor') resetView() }} />
+          <rect className="mk-hit" x={PAD_L} y={0} width={plotW} height={plotBottom} onPointerDown={handleDown} onPointerMove={handleMove} onPointerUp={handleUp} onPointerCancel={handleCancel} onLostPointerCapture={handleCancel} onPointerLeave={handleLeave} onDoubleClick={() => { if (tool === 'cursor') resetView() }} />
 
           {crossX !== null && count >= 2 && (
             <g pointerEvents="none" className="mk-cross">
