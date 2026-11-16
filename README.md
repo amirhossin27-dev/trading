@@ -1,5 +1,9 @@
 # Trading
 
+Die iPhone-Ansicht gibt dem Chart die Hauptfläche. Gespeicherte Kurse öffnen sich als Seitenschieber; Sprache, Darstellung und weitere Einstellungen liegen unten. Neue Kurse starten mit Kerzen, und jeder Kurs merkt sich seinen Zeitraum. Bis zu 5000 Kurse können gespeichert werden; Preisabrufe beschränken sich auf den aktiven Kurs und die sichtbare Listenseite.
+
+Kursalarme verwenden einen separaten Supabase-Dienst, damit sie auch bei geschlossener App geprüft werden. Einrichtung, Betrieb und Grenzen stehen in [docs/alarm-service.md](docs/alarm-service.md). Der öffentliche Endpunkt steht unter `alertServiceUrl` in `public/config.js`; private Schlüssel gehören ausschließlich auf den Server. Auf dem iPhone werden Mitteilungen über die installierte Home-Screen-App ausdrücklich aktiviert. Eine rote Glocke bleibt bis zum Bestätigen; Öffnen zeigt Wochenkerzen und den Zielkurs.
+
 Eigenstaendige iPhone-Web-App und eingebettete Dashboard-Ansicht. Die App ist die fuehrende Quelle der Oberflaeche; das Company Dashboard zeigt die veroeffentlichte Version und enthaelt keine zweite Kopie dieser Ansicht.
 
 - App: https://amirhossin27-dev.github.io/trading/

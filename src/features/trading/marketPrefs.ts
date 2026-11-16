@@ -29,14 +29,40 @@ export interface MarketPrefs {
   timeframe: Timeframe
   indicators: IndicatorId[]
   drawings: Record<string, Drawing[]>
+  views: Record<string, ChartView>
+}
+
+export interface ChartView {
+  kind: ChartKind
+  range: LineRange
+  timeframe: Timeframe
 }
 
 export const storageKey = 'dwh.market.v1'
-export const maxTabs = 14
+export const maxTabs = 5000
 export const maxDrawingsPerMarket = 40
 
 export function defaultPrefs(): MarketPrefs {
-  return { tabs: [defaultAssetId], extras: {}, active: defaultAssetId, kind: 'line', range: '1D', timeframe: 'D', indicators: [], drawings: {} }
+  return { tabs: [defaultAssetId], extras: {}, active: defaultAssetId, kind: 'candles', range: '1D', timeframe: 'auto', indicators: [], drawings: {}, views: {} }
+}
+
+function chartView(value: { kind?: unknown; range?: unknown; timeframe?: unknown }): ChartView {
+  return {
+    kind: value.kind === 'line' ? 'line' : 'candles',
+    range: lineRanges.includes(value.range as LineRange) ? value.range as LineRange : '1D',
+    timeframe: timeframes.includes(value.timeframe as Timeframe) ? value.timeframe as Timeframe : 'auto',
+  }
+}
+
+/** A market switch restores that market's own view, rather than overwriting every chart. */
+export function updateMarketPrefs(current: MarketPrefs, patch: Partial<MarketPrefs>): MarketPrefs {
+  const views = { ...current.views, [current.active]: chartView(current) }
+  let next = { ...current, ...patch, views }
+  if (patch.active && patch.active !== current.active) next = { ...next, ...(views[patch.active] ?? chartView({})) }
+  if (patch.kind !== undefined || patch.range !== undefined || patch.timeframe !== undefined) {
+    views[next.active] = chartView(next)
+  }
+  return next
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -90,15 +116,26 @@ export function sanitizePrefs(value: unknown): MarketPrefs {
     }
   }
 
+  const active = typeof value.active === 'string' && tabs.includes(value.active) ? value.active : tabs[0]
+  const views: Record<string, ChartView> = {}
+  if (isRecord(value.views)) {
+    for (const id of tabs) {
+      const view = value.views[id]
+      if (isRecord(view)) views[id] = chartView(view)
+    }
+  }
+  const selectedView = views[active] ?? chartView(value)
+  // Legacy settings had one global view. Seed it for the active instrument during migration.
+  views[active] = selectedView
+
   return {
     tabs,
     extras,
-    active: typeof value.active === 'string' && tabs.includes(value.active) ? value.active : tabs[0],
-    kind: value.kind === 'candles' ? 'candles' : 'line',
-    range: lineRanges.includes(value.range as LineRange) ? (value.range as LineRange) : defaults.range,
-    timeframe: timeframes.includes(value.timeframe as Timeframe) ? (value.timeframe as Timeframe) : defaults.timeframe,
+    active,
+    ...selectedView,
     indicators,
     drawings,
+    views,
   }
 }
 

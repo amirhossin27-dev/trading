@@ -78,6 +78,7 @@ interface PriceChartProps {
   labels: ChartLabels
   /** Fixed number of price decimals (currency pairs); otherwise the price decides. */
   digits?: number
+  alarmTarget?: { price: number; label: string }
 }
 
 const day = 86_400_000
@@ -261,7 +262,7 @@ const SubPanel = memo(function SubPanel({ id, top, height, candles, from, to, st
   )
 })
 
-export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indicators, hasVolume, drawings, onDrawingsChange, tool, onToolChange, locale, labels, digits }: PriceChartProps) {
+export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indicators, hasVolume, drawings, onDrawingsChange, tool, onToolChange, locale, labels, digits, alarmTarget }: PriceChartProps) {
   const gradientId = useId()
   const clipId = useId()
   const plotClipId = useId()
@@ -849,6 +850,11 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
               <Badge x={PAD_L + plotW + 4} y={clamp(yOf(last.c), PAD_T + 9, PAD_T + mainH - 9)} text={fmt.format(last.c)} anchor="start" tone="currentColor" />
             </g>
           )}
+
+          {alarmTarget && Number.isFinite(alarmTarget.price) && <g className="mk-alarm-target" pointerEvents="none" style={{ color: '#d43248' }}>
+            <line x1={PAD_L} x2={PAD_L + plotW} y1={clamp(yOf(alarmTarget.price), PAD_T + 10, PAD_T + mainH - 10)} y2={clamp(yOf(alarmTarget.price), PAD_T + 10, PAD_T + mainH - 10)} stroke="currentColor" strokeWidth={1.5} strokeDasharray="5 4" />
+            <Badge x={PAD_L + 8} y={clamp(yOf(alarmTarget.price), PAD_T + 10, PAD_T + mainH - 10)} text={`${alarmTarget.price > hi ? '↑ ' : alarmTarget.price < lo ? '↓ ' : ''}${alarmTarget.label}`} anchor="start" tone="#b9233a" />
+          </g>}
 
           <g clipPath={`url(#${clipId})`} pointerEvents="none">
             {drawings.map((drawing) => renderDrawing(drawing))}

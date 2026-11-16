@@ -1091,3 +1091,85 @@
   .mk-zoom button { width:44px; height:44px; }
   .mk-zoom svg { width:18px; height:18px; }
 }
+
+/* Standalone: only the compact quote and periods sit above the flexible chart. */
+.tr-standalone { flex: 1; height: auto; min-height: 0; }
+.tr-standalone .mk-card { min-height: 0; }
+.tr-standalone .mk-layout { display: flex; gap: 0; }
+.tr-standalone .mk-main { flex: 1; }
+.tr-standalone .mk-head { display: grid; grid-template-columns: minmax(0, 1fr) auto 44px; align-items: center; gap: 10px; flex: none; margin-bottom: 10px; }
+.tr-standalone .mk-identity { min-width: 0; }
+.tr-standalone .mk-eyebrow { margin-bottom: 3px; font-size: 9px; letter-spacing: .06em; gap: 5px; }
+.tr-standalone .mk-head h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: clamp(13px, 2vw, 18px); line-height: 1.25; margin: 0; }
+.tr-standalone .mk-market-state { display: none; }
+.tr-standalone .mk-price { flex-direction: column; align-items: flex-end; gap: 4px; }
+.tr-standalone .mk-price strong { font-size: clamp(15px, 2.5vw, 22px); white-space: nowrap; }
+.tr-standalone .mk-change { font-size: 10px; padding: 2px 5px; white-space: nowrap; }
+.mk-watch-trigger { position: relative; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; }
+.mk-watch-trigger svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; }
+.mk-watch-trigger > span { position: absolute; top: -5px; right: -4px; min-width: 15px; border-radius: 20px; padding: 2px 4px; background: var(--accent-soft); border: 1px solid var(--border); color: var(--accent-strong); font-size: 9px; }
+.tr-standalone .mk-toolbar { flex: none; margin-bottom: 6px; }
+.mk-ranges { display: grid; width: 100%; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 5px; }
+.mk-ranges button { min-width: 0; min-height: 44px; padding: 5px; border-radius: 10px; }
+.tr-standalone .mk-body { min-height: 180px; flex-direction: row; }
+.tr-standalone .mk-stage { min-height: 0; }
+.tr-standalone .mk-hint { position: absolute; z-index: 1; top: 106px; left: 12px; right: 85px; pointer-events: none; font-size: 11px; }
+.tr-standalone .mk-main { position: relative; }
+.mk-bottom-bar { position: relative; display: flex; flex: none; align-items: center; gap: 6px; padding-top: 10px; }
+.mk-bottom-bar > .mk-menu { position: relative; flex: 1; min-width: 0; margin: 0; }
+.mk-bottom-bar .mk-menu-button { justify-content: center; gap: 5px; width: 100%; min-height: 44px; padding: 6px 8px; border-radius: 10px; font-size: 12px; white-space: nowrap; }
+.mk-bottom-bar .mk-menu-button svg { flex: none; }
+.mk-bottom-bar .mk-tools-trigger svg { display: none; }
+.mk-bottom-bar .mk-popover { top: auto; bottom: calc(100% + 8px); max-width: calc(100vw - 44px); }
+.mk-bottom-bar > .mk-menu:first-child .mk-popover { left: 0; right: auto; }
+.mk-chart-options { gap: 12px; min-width: min(290px, calc(100vw - 44px)); padding: 12px; }
+.mk-chart-options .mk-units { display: flex; flex-wrap: wrap; }
+.mk-chart-options .mk-units button, .mk-chart-options .mk-seg button { min-height: 44px; }
+.mk-tool-popover { min-width: 0; padding: 8px; right: auto; left: 50%; transform: translateX(-50%); }
+.mk-tool-popover .mk-tools { flex-direction: row; flex-wrap: wrap; justify-content: center; width: 152px; }
+.mk-tool-popover .mk-tools button { width: 44px; height: 44px; }
+.mk-watch-filter { box-sizing: border-box; width: 100%; margin-bottom: 10px; min-height: 44px; }
+.mk-watch-pages { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; font-size: 12px; color: var(--text-muted); }
+.mk-watch-pages button { min-width: 44px; min-height: 44px; padding: 5px; }
+
+/* The portal is outside chart layout, so a slide never changes the chart box. */
+.tr-overlay { position: fixed; z-index: 100; inset: 0; visibility: hidden; pointer-events: none; transition: visibility 0s linear .24s; }
+.tr-overlay.is-open { visibility: visible; pointer-events: auto; transition-delay: 0s; }
+.mk-watch-backdrop { position: absolute; inset: 0; opacity: 0; background: rgb(0 0 0 / .3); transition: opacity .24s ease; }
+.tr-overlay.is-open .mk-watch-backdrop { opacity: 1; }
+.tr-overlay-panel { position: absolute; box-sizing: border-box; top: 0; bottom: 0; right: 0; width: min(440px, 88vw); display: flex; flex-direction: column; padding: calc(32px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(18px, env(safe-area-inset-bottom, 0px)) 12px; border-left: 1px solid var(--border); color: var(--text); background: var(--panel); box-shadow: var(--shadow); transform: translateX(105%); transition: transform .24s ease; }
+.tr-overlay.is-open .tr-overlay-panel { transform: translateX(0); }
+.tr-overlay-panel { background: var(--bg); }
+.tr-dialog-close { position: absolute; z-index: 2; top: calc(24px + env(safe-area-inset-top, 0px)); right: 12px; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; }
+.tr-dialog-close svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; width: 20px; height: 20px; }
+.mk-watch-overlay .mk-watch { flex: 1; min-height: 0; padding: 0; border: 0; }
+.mk-watch-overlay .mk-watch-head { justify-content: flex-start; gap: 10px; min-height: 44px; padding-right: 54px; margin-bottom: 12px; }
+.mk-watch-overlay .mk-watch-head h3 { flex: 1; font-size: 14px; text-transform: none; letter-spacing: 0; }
+.mk-watch-overlay .mk-add-button { width: 44px; height: 44px; border-radius: 10px; }
+.mk-watch-overlay .mk-watch-list { display: grid; gap: 4px; margin: 0; padding: 2px; overflow-y: auto; overflow-x: hidden; }
+.mk-watch-overlay .mk-row { grid-template-columns: minmax(0, 1fr) 36px; border-radius: 10px; }
+.mk-watch-overlay .mk-row > button[role='tab'] { min-height: 52px; grid-template-columns: 24px minmax(44px, 1fr) auto; grid-template-rows: auto auto; gap: 3px 7px; padding: 7px; }
+.mk-watch-overlay .mk-avatar { grid-row: 1 / 3; }
+.mk-watch-overlay .mk-row-symbol { grid-column: 2; }
+.mk-watch-overlay .mk-row-price { display: block; grid-column: 3; font-size: 12px; }
+.mk-watch-overlay .mk-row-abs { display: block; grid-column: 2; grid-row: 2; text-align: left; font-size: 10px; }
+.mk-watch-overlay .mk-row-pct { grid-column: 3; grid-row: 2; font-size: 11px; }
+.mk-watch-overlay .mk-row-close { width: 36px; height: 44px; border-radius: 8px; opacity: .75; }
+.mk-watch-overlay .mk-picker { width: min(390px, calc(88vw - 30px)); top: calc(100% + 8px); max-height: calc(100dvh - 170px); }
+.mk-watch-overlay .mk-picker-list { max-height: min(340px, calc(100dvh - 350px)); }
+@media (max-width: 360px) {
+  .mk-bottom-bar { gap: 4px; }
+  .mk-bottom-bar .mk-menu-button { font-size: 11px; padding: 6px; gap: 2px; }
+  .mk-bottom-bar .mk-menu-button svg { display: none; }
+  .mk-bottom-bar .mk-tools-trigger svg { display: block; }
+  .mk-bottom-bar .mk-tools-trigger span { display: none; }
+  .tr-standalone .mk-head { gap: 7px; }
+}
+@media (max-width: 480px) {
+  .mk-bottom-bar > .mk-indicator-menu { flex: 0 0 44px; }
+  .mk-bottom-bar .mk-indicators-button { position: relative; }
+  .mk-bottom-bar .mk-indicators-button .mk-control-label { display: none; }
+  .mk-bottom-bar .mk-indicators-button svg { display: block; }
+  .mk-bottom-bar .mk-indicators-button b { position: absolute; top: -5px; right: -5px; }
+}
+@media (prefers-reduced-motion: reduce) { .tr-overlay, .tr-overlay-panel, .mk-watch-backdrop { transition: none; } }

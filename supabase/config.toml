@@ -1,0 +1,7 @@
+# The function authenticates devices and the private scheduler itself.
+# A publishable/anonymous project key is never device authorization.
+project_id = "trading-alerts"
+
+[functions.trading-alerts]
+verify_jwt = false
+entrypoint = "./functions/trading-alerts/index.ts"

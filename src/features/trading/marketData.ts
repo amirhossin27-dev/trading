@@ -12,10 +12,10 @@ export type ChartKind = 'line' | 'candles'
 /** Line chart: how far back the chart reaches. */
 export type LineRange = '1D' | '1W' | '1M' | '3M' | '1Y' | 'MAX'
 /** Candle chart: length of one candle (45 minutes, 4 hours, day, week, month). */
-export type Timeframe = '45m' | '4h' | 'D' | 'W' | 'M'
+export type Timeframe = 'auto' | '45m' | '4h' | 'D' | 'W' | 'M'
 
 export const lineRanges: LineRange[] = ['1D', '1W', '1M', '3M', '1Y', 'MAX']
-export const timeframes: Timeframe[] = ['45m', '4h', 'D', 'W', 'M']
+export const timeframes: Timeframe[] = ['auto', '45m', '4h', 'D', 'W', 'M']
 
 export interface SeriesSpec {
   interval: Interval
@@ -44,7 +44,7 @@ const cryptoRanges: Record<LineRange, SeriesSpec> = {
   MAX: { interval: '1w', limit: 1000, visible: 1000 },
 }
 
-const cryptoTimeframes: Record<Timeframe, SeriesSpec> = {
+const cryptoTimeframes: Record<Exclude<Timeframe, 'auto'>, SeriesSpec> = {
   '45m': { interval: '45m', limit: 330, visible: 110 },
   '4h': { interval: '4h', limit: 360, visible: 120 },
   D: { interval: '1d', limit: 365, visible: 120 },
@@ -63,7 +63,7 @@ const yahooRanges: Record<LineRange, SeriesSpec> = {
   MAX: { interval: '1w', limit: 1000, visible: 1000, yahoo: { fetch: '1wk', days: 36_500 } },
 }
 
-const yahooTimeframes: Record<Timeframe, SeriesSpec> = {
+const yahooTimeframes: Record<Exclude<Timeframe, 'auto'>, SeriesSpec> = {
   '45m': { interval: '45m', limit: 330, visible: 110, yahoo: { fetch: '15m', days: 59, sessions: true } },
   '4h': { interval: '4h', limit: 360, visible: 120, yahoo: { fetch: '60m', days: 300, sessions: true } },
   D: { interval: '1d', limit: 365, visible: 120, yahoo: { fetch: '1d', days: 560 } },
@@ -72,8 +72,8 @@ const yahooTimeframes: Record<Timeframe, SeriesSpec> = {
 }
 
 export function seriesSpec(kind: ChartKind, range: LineRange, timeframe: Timeframe, source: MarketAsset['source'] = 'binance'): SeriesSpec {
-  if (source === 'yahoo') return kind === 'line' ? yahooRanges[range] : yahooTimeframes[timeframe]
-  return kind === 'line' ? cryptoRanges[range] : cryptoTimeframes[timeframe]
+  if (source === 'yahoo') return kind === 'line' || timeframe === 'auto' ? yahooRanges[range] : yahooTimeframes[timeframe]
+  return kind === 'line' || timeframe === 'auto' ? cryptoRanges[range] : cryptoTimeframes[timeframe]
 }
 
 export interface MarketSeries {
@@ -181,11 +181,15 @@ function cryptoQuotes(assets: CryptoAsset[], signal?: AbortSignal): Promise<Reco
 
 async function yahooQuotes(assets: YahooAsset[], signal?: AbortSignal): Promise<Record<string, Quote>> {
   if (assets.length === 0) return {}
-  const rows = await loadYahooQuotes(assets.map((asset) => asset.yahoo), signal)
   const quotes: Record<string, Quote> = {}
-  for (const asset of assets) {
-    const row = rows.find((item) => item.symbol.toUpperCase() === asset.yahoo)
-    if (row && Number.isFinite(row.price) && Number.isFinite(row.changePct)) quotes[asset.id] = { price: row.price, changePct: row.changePct, currency: row.currency, marketOpen: row.marketOpen }
+  // The API accepts 20 symbols per request. Only the visible page plus the active market are requested by the UI.
+  for (let offset = 0; offset < assets.length; offset += 20) {
+    const batch = assets.slice(offset, offset + 20)
+    const rows = await loadYahooQuotes(batch.map((asset) => asset.yahoo), signal)
+    for (const asset of batch) {
+      const row = rows.find((item) => item.symbol.toUpperCase() === asset.yahoo)
+      if (row && Number.isFinite(row.price) && Number.isFinite(row.changePct)) quotes[asset.id] = { price: row.price, changePct: row.changePct, currency: row.currency, marketOpen: row.marketOpen }
+    }
   }
   return quotes
 }
