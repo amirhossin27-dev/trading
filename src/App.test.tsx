@@ -42,6 +42,7 @@ describe('App header', () => {
 
   it('offers installation help in the browser and closes it again', async () => {
     await openApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Einstellungen' }))
     fireEvent.click(screen.getByRole('button', { name: 'Aufs iPhone' }))
     expect(screen.getByText('Als eigene App öffnen')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Verstanden' }))
@@ -51,6 +52,7 @@ describe('App header', () => {
   it('hides installation in standalone display mode while keeping language and appearance controls', async () => {
     await openApp({ standalone: true })
     expect(screen.queryByRole('button', { name: 'Aufs iPhone' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Einstellungen' }))
     expect(screen.getByRole('button', { name: 'Sprache wechseln' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Darstellung wechseln' })).toBeTruthy()
   })
@@ -62,6 +64,7 @@ describe('App header', () => {
 
   it('keeps language and appearance settings usable and persistent in the installed app', async () => {
     await openApp({ iosStandalone: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Einstellungen' }))
     fireEvent.click(screen.getByRole('button', { name: 'Sprache wechseln' }))
     expect(document.documentElement.lang).toBe('en')
     expect(window.localStorage.getItem('trading.language')).toBe('en')
@@ -75,5 +78,18 @@ describe('App header', () => {
     await openApp({ href: '/' + query })
     expect(screen.queryByRole('banner')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Aufs iPhone' })).toBeNull()
+  })
+
+  it('uses a compact market header and a bottom settings dialog with focus restoration', async () => {
+    await openApp({ standalone: true })
+    expect(screen.queryByRole('heading', { name: 'Trading' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sprache wechseln' })).toBeNull()
+    const settings = screen.getByRole('button', { name: 'Einstellungen' })
+    settings.focus()
+    fireEvent.click(settings)
+    expect(screen.getByRole('dialog', { name: 'Einstellungen' })).toBeTruthy()
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Einstellungen' })).toBeNull()
+    expect(document.activeElement).toBe(settings)
   })
 })

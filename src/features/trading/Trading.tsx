@@ -5,6 +5,9 @@ import type { Language } from '../../types/platform'
 import { localeFor } from '../overview/overviewCopy'
 import { tradingCopy } from './tradingCopy'
 import { AssetPicker } from './AssetPicker'
+import { TradingDialog } from './TradingDialog'
+import { AlarmControls } from './AlarmControls'
+import type { AlertEvent } from './alertService'
 import { indicatorColors } from './indicatorColors'
 import { PriceChart } from './PriceChart'
 import type { Tool } from './PriceChart'
@@ -14,8 +17,8 @@ import { assetById, assetDigits, marketAssets } from './marketAssets'
 import type { MarketAsset } from './marketAssets'
 import { lineRanges, loadQuotes, loadSeries, seriesSpec, timeframes } from './marketData'
 import type { ChartKind, LineRange, MarketSeries, Quote, Timeframe } from './marketData'
-import { indicatorIds, maxDrawingsPerMarket, maxTabs, readPrefs, writePrefs } from './marketPrefs'
-import type { Drawing, IndicatorId, MarketPrefs } from './marketPrefs'
+import { indicatorIds, maxDrawingsPerMarket, maxTabs, readPrefs, writePrefs, updateMarketPrefs } from './marketPrefs'
+import type { ChartView, Drawing, IndicatorId, MarketPrefs } from './marketPrefs'
 
 const quoteRefreshMs = 15_000
 const seriesRefreshMs = 60_000
@@ -64,6 +67,12 @@ function ToolIcon({ tool }: { tool: Tool | 'clear' }) {
 
 const drawingTools: Tool[] = ['cursor', 'trend', 'hline', 'fib', 'measure']
 
+function WatchlistLayer({ embedded, open, onClose, label, closeLabel, children }: {
+  embedded: boolean; open: boolean; onClose: () => void; label: string; closeLabel: string; children: ReactNode
+}) {
+  return embedded ? children : <TradingDialog open={open} onClose={onClose} label={label} closeLabel={closeLabel} className="mk-watch-overlay">{children}</TradingDialog>
+}
+
 const brandColors: Record<string, string> = {
   BTC: '#f7931a', ETH: '#627eea', SOL: '#9945ff', XRP: '#2b3138', ADA: '#0a3fb8', DOGE: '#c2a633', BNB: '#d9a40a', HBAR: '#222222',
   LINK: '#2a5ada', DOT: '#e6007a', AVAX: '#e84142', LTC: '#345d9d', TRX: '#eb0029', SHIB: '#e42d04', UNI: '#ff007a', POL: '#7b3fe4',
@@ -84,13 +93,19 @@ function signed(format: Intl.NumberFormat, value: number) {
   return `${value < 0 ? '−' : '+'}${text}`
 }
 
-export function Trading({ language }: { language: Language }) {
+export function Trading({ language, embedded = false, settingsControl }: { language: Language; embedded?: boolean; settingsControl?: ReactNode }) {
   const t = tradingCopy(language)
   const locale = localeFor(language)
   const [prefs, setPrefs] = useState<MarketPrefs>(readPrefs)
+  const [alertView, setAlertView] = useState<(ChartView & { event: AlertEvent }) | null>(null)
   const [tool, setTool] = useState<Tool>('cursor')
   const [pickerOpen, setPickerOpen] = useState(false)
   const [indicatorsOpen, setIndicatorsOpen] = useState(false)
+  const [watchOpen, setWatchOpen] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [watchFilter, setWatchFilter] = useState('')
+  const [watchPage, setWatchPage] = useState(0)
   const [retryCount, setRetryCount] = useState(0)
   const [seriesState, setSeriesState] = useState<SeriesState>({ key: '', series: null, failed: false })
   const [quotes, setQuotes] = useState<Record<string, Quote>>({})
@@ -106,19 +121,44 @@ export function Trading({ language }: { language: Language }) {
 
   const pickerRef = useDismiss(pickerOpen, () => setPickerOpen(false))
   const indicatorsRef = useDismiss(indicatorsOpen, () => setIndicatorsOpen(false))
+  const optionsRef = useDismiss(optionsOpen, () => setOptionsOpen(false))
+  const toolsRef = useDismiss(toolsOpen, () => setToolsOpen(false))
 
   // A market found with the search is built from the stored name on every lookup: keep one object, or every render would start a new request.
-  const asset = useMemo(() => assetById(prefs.active, prefs.extras) ?? marketAssets[0], [prefs.active, prefs.extras])
+  const asset = useMemo(() => alertView?.event.asset ?? assetById(prefs.active, prefs.extras) ?? marketAssets[0], [alertView?.event.asset, prefs.active, prefs.extras])
+  const chartView = alertView ?? prefs
   const tabAssets = useMemo(() => prefs.tabs.map((id) => assetById(id, prefs.extras)).filter((item): item is MarketAsset => item !== undefined), [prefs.tabs, prefs.extras])
+  const filteredAssets = useMemo(() => {
+    const search = watchFilter.trim().toLocaleLowerCase(locale)
+    return search ? tabAssets.filter((item) => `${item.name} ${item.symbol}`.toLocaleLowerCase(locale).includes(search)) : tabAssets
+  }, [tabAssets, watchFilter, locale])
+  const pageCount = Math.max(1, Math.ceil(filteredAssets.length / 20))
+  const currentPage = Math.min(watchPage, pageCount - 1)
+  const visibleAssets = filteredAssets.slice(currentPage * 20, (currentPage + 1) * 20)
   // The prices do not depend on the order of the list: moving a row must not start new requests.
-  const marketKey = [...prefs.tabs].sort().join(',')
-  const quoteAssets = useMemo(() => marketKey.split(',').map((id) => assetById(id, prefs.extras)).filter((item): item is MarketAsset => item !== undefined), [marketKey, prefs.extras])
-  const spec = seriesSpec(prefs.kind, prefs.range, prefs.timeframe, asset.source)
+  const marketKey = [...new Set([asset.id, ...(embedded || watchOpen ? visibleAssets.map((item) => item.id) : [])])].sort().join(',')
+  const quoteAssets = useMemo(() => marketKey.split(',').map((id) => id === asset.id ? asset : assetById(id, prefs.extras)).filter((item): item is MarketAsset => item !== undefined), [marketKey, prefs.extras, asset])
+  const spec = seriesSpec(chartView.kind, chartView.range, chartView.timeframe, asset.source)
   const requestKey = `${asset.id}|${spec.interval}|${spec.limit}|${retryCount}`
-  const viewKey = `${asset.id}|${prefs.kind}|${prefs.kind === 'line' ? prefs.range : prefs.timeframe}`
+  const viewKey = `${asset.id}|${chartView.kind}|${chartView.range}|${chartView.timeframe}|${alertView?.event.id ?? ''}`
 
   function update(patch: Partial<MarketPrefs>) {
-    setPrefs((current) => ({ ...current, ...patch }))
+    const viewChanged = patch.kind !== undefined || patch.range !== undefined || patch.timeframe !== undefined
+    setPrefs((current) => {
+      // A target can still be viewed when the saved-market cap is full; never overwrite a different market's view.
+      if (viewChanged && alertView && current.active !== alertView.event.asset.id) return current
+      return updateMarketPrefs(current, viewChanged && alertView ? { kind: alertView.kind, range: alertView.range, timeframe: alertView.timeframe, ...patch } : patch)
+    })
+    if (viewChanged) {
+      setAlertView((current) => current ? { ...current, kind: patch.kind ?? current.kind, range: patch.range ?? current.range, timeframe: patch.timeframe ?? current.timeframe } : null)
+    }
+  }
+
+  function openAlarm(event: AlertEvent) {
+    pickAsset(event.asset)
+    setOptionsOpen(false); setToolsOpen(false); setIndicatorsOpen(false)
+    // Opening an alert is temporary; preserve the user's view until they deliberately change a control.
+    setAlertView({ event, kind: 'candles', range: '1W', timeframe: 'auto' })
   }
 
   useEffect(() => {
@@ -143,8 +183,10 @@ export function Trading({ language }: { language: Language }) {
   useEffect(() => {
     const controller = new AbortController()
     function refresh() {
-      loadQuotes(quoteAssets, controller.signal)
-        .then((next) => setQuotes((current) => ({ ...current, ...next })))
+      // The active market may be outside this page: preserve the API's 20-symbol request cap.
+      const batches = Array.from({ length: Math.ceil(quoteAssets.length / 20) }, (_, index) => quoteAssets.slice(index * 20, (index + 1) * 20))
+      Promise.all(batches.map((batch) => loadQuotes(batch, controller.signal)))
+        .then((results) => { if (!controller.signal.aborted) setQuotes((current) => Object.assign({}, current, ...results)) })
         .catch(() => undefined)
     }
     refresh()
@@ -175,7 +217,7 @@ export function Trading({ language }: { language: Language }) {
   const baseline = candles.length > 0 ? candles[Math.max(0, candles.length - Math.min(spec.visible, candles.length))].o : null
   const change = price !== null && baseline !== null && baseline !== 0 ? price / baseline - 1 : null
   const trend = change === null ? 'flat' : change >= 0 ? 'up' : 'down'
-  const rangeName = prefs.kind === 'line' ? t.rangeNames[prefs.range] : t.timeframeNames[prefs.timeframe]
+  const rangeName = chartView.kind === 'line' || chartView.timeframe === 'auto' ? t.rangeNames[chartView.range] : t.timeframeNames[chartView.timeframe]
 
   const currency = quote?.currency ?? series?.currency ?? 'USD'
   const digits = assetDigits(asset, price ?? 1)
@@ -185,21 +227,25 @@ export function Trading({ language }: { language: Language }) {
   const drawings = prefs.drawings[asset.id] ?? []
 
   function selectTab(id: string) {
+    setAlertView(null)
     setTool('cursor')
     update({ active: id })
+    if (!embedded) setWatchOpen(false)
   }
 
   function pickAsset(picked: MarketAsset) {
+    setAlertView(null)
     setPickerOpen(false)
+    if (!embedded) setWatchOpen(false)
     setTool('cursor')
     setPrefs((current) => {
-      if (current.tabs.includes(picked.id)) return { ...current, active: picked.id }
+      if (current.tabs.includes(picked.id)) return updateMarketPrefs(current, { active: picked.id })
       if (current.tabs.length >= maxTabs) return current
       // A market from the search is remembered with its name; the quick picks are known anyway.
       const extras = picked.source === 'yahoo' && assetById(picked.id) === undefined
         ? { ...current.extras, [picked.id]: { symbol: picked.symbol, name: picked.name, group: picked.group } }
         : current.extras
-      return { ...current, tabs: [...current.tabs, picked.id], extras, active: picked.id }
+      return updateMarketPrefs(current, { tabs: [...current.tabs, picked.id], extras, active: picked.id })
     })
   }
 
@@ -210,7 +256,7 @@ export function Trading({ language }: { language: Language }) {
       const tabs = current.tabs.filter((item) => item !== id)
       const active = current.active === id ? tabs[Math.min(index, tabs.length - 1)] : current.active
       const extras = Object.fromEntries(Object.entries(current.extras).filter(([extraId]) => extraId !== id))
-      return { ...current, tabs, extras, active }
+      return updateMarketPrefs(current, { tabs, extras, active })
     })
     setTool('cursor')
   }
@@ -259,6 +305,7 @@ export function Trading({ language }: { language: Language }) {
     const to = Math.max(0, Math.min(prefs.tabs.length - 1, from + step))
     if (from < 0 || to === from) return
     moveTab(tab.id, to)
+    if (!watchFilter.trim()) setWatchPage(Math.floor(to / 20))
     setMoveNote(t.moved(tab.name, to + 1, prefs.tabs.length))
     // The moved row is re-inserted into the page: give the focus back to it once it is in its new place.
     window.requestAnimationFrame(() => {
@@ -283,21 +330,40 @@ export function Trading({ language }: { language: Language }) {
     update({ kind })
   }
 
-  const unitOptions: Array<{ id: LineRange | Timeframe; label: string; name: string; active: boolean; choose: () => void }> = prefs.kind === 'line'
-    ? lineRanges.map((range) => ({ id: range, label: t.rangeLabels[range], name: t.rangeNames[range], active: range === prefs.range, choose: () => update({ range }) }))
-    : timeframes.map((timeframe) => ({ id: timeframe, label: t.timeframeLabels[timeframe], name: t.timeframeNames[timeframe], active: timeframe === prefs.timeframe, choose: () => update({ timeframe }) }))
+  const unitOptions: Array<{ id: LineRange | Timeframe; label: string; name: string; active: boolean; choose: () => void }> = chartView.kind === 'line'
+    ? lineRanges.map((range) => ({ id: range, label: t.rangeLabels[range], name: t.rangeNames[range], active: range === chartView.range, choose: () => update({ range, timeframe: 'auto' }) }))
+    : timeframes.map((timeframe) => ({ id: timeframe, label: timeframe === 'auto' ? t.autoTimeframe : t.timeframeLabels[timeframe], name: t.timeframeNames[timeframe] ?? t.autoTimeframe, active: timeframe === chartView.timeframe, choose: () => update({ timeframe }) }))
 
   const marketState = quote?.marketOpen === true ? t.marketOpen : quote?.marketOpen === false ? t.marketClosed : null
 
   const priceFormats = (item: MarketAsset, reference: number) => priceFormatter(locale, reference, {}, assetDigits(item, reference))
 
+  const kindControls = <div className="mk-seg" role="group" aria-label={t.kindLabel}>
+    {(['line', 'candles'] as const).map((kind) => <button key={kind} type="button" className={chartView.kind === kind ? 'active' : ''} aria-pressed={chartView.kind === kind} onClick={() => chooseKind(kind)}>{t.kinds[kind]}</button>)}
+  </div>
+
+  const indicatorMenu = <div className="mk-menu mk-indicator-menu" ref={indicatorsRef}>
+    <button type="button" className={`mk-menu-button mk-indicators-button${prefs.indicators.length > 0 ? ' has-value' : ''}`} aria-label={t.indicatorsButton} aria-haspopup="true" aria-expanded={indicatorsOpen} onClick={() => { setIndicatorsOpen((open) => !open); setToolsOpen(false); setOptionsOpen(false) }}>
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 17l5-6 4 3 4-7 5 5" /></svg>
+      <span className="mk-control-label">{t.indicatorsButton}</span>{prefs.indicators.length > 0 && <b>{prefs.indicators.length}</b>}
+    </button>
+    {indicatorsOpen && <div className="mk-popover" role="group" aria-label={t.indicatorsButton}>
+      {indicatorIds.map((id) => <label key={id} className="mk-check"><input type="checkbox" checked={prefs.indicators.includes(id)} onChange={() => toggleIndicator(id)} /><span className="mk-swatch" style={{ background: indicatorColors[id] }} aria-hidden="true" /><span>{t.indicators[id]}</span></label>)}
+    </div>}
+  </div>
+
+  const drawingControls = <div className="mk-tools" role="group" aria-label={t.toolsLabel}>
+    {drawingTools.map((item) => <button key={item} type="button" className={tool === item ? 'active' : ''} aria-pressed={tool === item} aria-label={t.tools[item]} title={t.tools[item]} onClick={() => { setTool(item); setToolsOpen(false) }}><ToolIcon tool={item} /></button>)}
+    <button type="button" aria-label={t.tools.clear} title={t.tools.clear} disabled={drawings.length === 0} onClick={() => setDrawings([])}><ToolIcon tool="clear" /></button>
+  </div>
+
   return (
-    <section className="tr-page">
+    <section className={`tr-page${embedded ? ' tr-embedded' : ' tr-standalone'}`}>
       <article className={`panel mk-card is-${trend}`}>
         <div className="mk-layout">
           <div className="mk-main">
             <div className="mk-head">
-              <div>
+              <div className="mk-identity">
                 <p className="eyebrow mk-eyebrow">
                   <span className={`mk-live-dot${quote?.marketOpen === false ? ' is-closed' : ''}`} title={t.live} aria-hidden="true" />
                   {t.eyebrow}
@@ -309,60 +375,33 @@ export function Trading({ language }: { language: Language }) {
                 <strong>{price !== null ? money.format(price) : '—'}</strong>
                 {change !== null && <span className={`mk-change is-${trend}`} title={rangeName}>{percent.format(change)}</span>}
               </div>
+              {!embedded && <button type="button" className="mk-watch-trigger" aria-label={`${t.openWatchlist} (${prefs.tabs.length})`} aria-haspopup="dialog" aria-expanded={watchOpen} onClick={() => { setWatchOpen(true); setOptionsOpen(false); setToolsOpen(false); setIndicatorsOpen(false) }}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M3 6h.1M3 12h.1M3 18h.1" /></svg><span>{prefs.tabs.length}</span>
+              </button>}
             </div>
 
             <div className="mk-toolbar">
-              <div className="mk-seg" role="group" aria-label={t.kindLabel}>
-                {(['line', 'candles'] as const).map((kind) => (
-                  <button key={kind} type="button" className={prefs.kind === kind ? 'active' : ''} aria-pressed={prefs.kind === kind} onClick={() => chooseKind(kind)}>{t.kinds[kind]}</button>
-                ))}
+              {embedded && kindControls}
+              <div className={`mk-units${embedded ? '' : ' mk-ranges'}`} role="group" aria-label={embedded ? (chartView.kind === 'line' ? t.kinds.line : t.kinds.candles) : t.rangeLabel}>
+                {embedded ? unitOptions.map((option) => <button key={option.id} type="button" className={option.active ? 'active' : ''} aria-pressed={option.active} title={option.name} onClick={option.choose}>{option.label}</button>)
+                  : lineRanges.map((range) => <button key={range} type="button" className={chartView.range === range && (chartView.kind === 'line' || chartView.timeframe === 'auto') ? 'active' : ''} aria-pressed={chartView.range === range && (chartView.kind === 'line' || chartView.timeframe === 'auto')} title={t.rangeNames[range]} onClick={() => update({ range, timeframe: 'auto' })}>{t.rangeLabels[range]}</button>)}
               </div>
-
-              <div className="mk-units" role="group" aria-label={prefs.kind === 'line' ? t.kinds.line : t.kinds.candles}>
-                {unitOptions.map((option) => (
-                  <button key={option.id} type="button" className={option.active ? 'active' : ''} aria-pressed={option.active} title={option.name} onClick={option.choose}>{option.label}</button>
-                ))}
-              </div>
-
-              <div className="mk-menu" ref={indicatorsRef}>
-                <button type="button" className={`mk-menu-button${prefs.indicators.length > 0 ? ' has-value' : ''}`} aria-haspopup="true" aria-expanded={indicatorsOpen} onClick={() => setIndicatorsOpen((open) => !open)}>
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 17l5-6 4 3 4-7 5 5" /></svg>
-                  {t.indicatorsButton}
-                  {prefs.indicators.length > 0 && <b>{prefs.indicators.length}</b>}
-                </button>
-                {indicatorsOpen && (
-                  <div className="mk-popover" role="group" aria-label={t.indicatorsButton}>
-                    {indicatorIds.map((id) => (
-                      <label key={id} className="mk-check">
-                        <input type="checkbox" checked={prefs.indicators.includes(id)} onChange={() => toggleIndicator(id)} />
-                        <span className="mk-swatch" style={{ background: indicatorColors[id] }} aria-hidden="true" />
-                        <span>{t.indicators[id]}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {embedded && chartView.kind === 'candles' && <div className="mk-units" role="group" aria-label={t.rangeLabel}>
+                {lineRanges.map((range) => <button key={range} type="button" className={chartView.range === range && chartView.timeframe === 'auto' ? 'active' : ''} aria-pressed={chartView.range === range && chartView.timeframe === 'auto'} title={t.rangeNames[range]} onClick={() => update({ range, timeframe: 'auto' })}>{t.rangeLabels[range]}</button>)}
+              </div>}
+              {embedded && indicatorMenu}
             </div>
 
             {tool !== 'cursor' && <p className="mk-hint" role="status">{t.toolHints[tool]}</p>}
 
             <div className="mk-body">
-              <div className="mk-tools" role="group" aria-label={t.toolsLabel}>
-                {drawingTools.map((item) => (
-                  <button key={item} type="button" className={tool === item ? 'active' : ''} aria-pressed={tool === item} aria-label={t.tools[item]} title={t.tools[item]} onClick={() => setTool(item)}>
-                    <ToolIcon tool={item} />
-                  </button>
-                ))}
-                <button type="button" aria-label={t.tools.clear} title={t.tools.clear} disabled={drawings.length === 0} onClick={() => setDrawings([])}>
-                  <ToolIcon tool="clear" />
-                </button>
-              </div>
+              {embedded && drawingControls}
               <div className="mk-stage" role="tabpanel" aria-label={t.chartLabel(asset.name)}>
                 {candles.length >= 2 ? (
                   <PriceChart
                     key={viewKey}
                     candles={candles}
-                    kind={prefs.kind}
+                    kind={chartView.kind}
                     visible={spec.visible}
                     intervalMs={intervalMs[spec.interval]}
                     indicators={prefs.indicators}
@@ -374,6 +413,7 @@ export function Trading({ language }: { language: Language }) {
                     locale={locale}
                     labels={t.chart}
                     digits={digits}
+                    alarmTarget={alertView ? { price: alertView.event.target, label: `${language === 'de' ? 'Alarm' : 'Alert'} · ${priceFormatter(locale, alertView.event.target).format(alertView.event.target)} ${alertView.event.currency}` } : undefined}
                   />
                 ) : failed ? (
                   <div className="mk-state">
@@ -386,8 +426,28 @@ export function Trading({ language }: { language: Language }) {
               </div>
             </div>
 
+            {!embedded && <div className="mk-bottom-bar">
+              <div className="mk-menu" ref={optionsRef}>
+                <button type="button" className="mk-menu-button" aria-label={t.chartOptions} aria-expanded={optionsOpen} onClick={() => { setOptionsOpen((open) => !open); setToolsOpen(false); setIndicatorsOpen(false) }}>{t.kinds[chartView.kind]}<span aria-hidden="true">⌄</span></button>
+                {optionsOpen && <div className="mk-popover mk-chart-options">
+                  {kindControls}
+                  {chartView.kind === 'candles' && <div className="mk-units" role="group" aria-label={t.kinds.candles}>
+                    {timeframes.map((timeframe) => <button key={timeframe} type="button" className={chartView.timeframe === timeframe ? 'active' : ''} aria-pressed={chartView.timeframe === timeframe} title={t.timeframeNames[timeframe] ?? t.autoTimeframe} onClick={() => update({ timeframe })}>{timeframe === 'auto' ? t.autoTimeframe : t.timeframeLabels[timeframe]}</button>)}
+                  </div>}
+                </div>}
+              </div>
+              <div className="mk-menu" ref={toolsRef}>
+                <button type="button" className={`mk-menu-button mk-tools-trigger${tool !== 'cursor' ? ' has-value' : ''}`} aria-label={t.toolsButton} aria-expanded={toolsOpen} onClick={() => { setToolsOpen((open) => !open); setOptionsOpen(false); setIndicatorsOpen(false) }}><ToolIcon tool={tool} /><span>{t.toolsButton}</span></button>
+                {toolsOpen && <div className="mk-popover mk-tool-popover">{drawingControls}</div>}
+              </div>
+              {indicatorMenu}
+              <AlarmControls asset={asset} currency={asset.source === 'binance' ? 'USD' : quote?.currency ?? series?.currency ?? ''} language={language} onOpen={openAlarm} />
+              {settingsControl}
+            </div>}
+
           </div>
 
+          <WatchlistLayer embedded={embedded} open={watchOpen} onClose={() => { setWatchOpen(false); setPickerOpen(false) }} label={t.watchlist} closeLabel={t.closeWatchlist}>
           <aside className="mk-watch">
             <div className="mk-watch-head" ref={pickerRef}>
               <h3>{t.watchlist}</h3>
@@ -396,6 +456,7 @@ export function Trading({ language }: { language: Language }) {
               </button>
               {pickerOpen && <AssetPicker tabs={prefs.tabs} full={prefs.tabs.length >= maxTabs} onPick={pickAsset} onClose={() => setPickerOpen(false)} labels={t} />}
             </div>
+            <input type="search" className="mk-watch-filter" aria-label={t.filterWatchlist} placeholder={t.filterWatchlist} value={watchFilter} onChange={(event) => { setWatchFilter(event.target.value); setWatchPage(0) }} />
             <div
               ref={listRef}
               className="mk-watch-list"
@@ -407,7 +468,7 @@ export function Trading({ language }: { language: Language }) {
                 if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDrag((current) => (current ? { ...current, overId: null } : current))
               }}
             >
-              {tabAssets.map((tab) => {
+              {visibleAssets.map((tab) => {
                 const row = quotes[tab.id]
                 const active = tab.id === asset.id
                 const tone = row ? (row.changePct >= 0 ? 'up' : 'down') : 'flat'
@@ -459,8 +520,15 @@ export function Trading({ language }: { language: Language }) {
                 )
               })}
             </div>
+            {filteredAssets.length === 0 && <p className="mk-picker-empty">{t.noResults}</p>}
+            {pageCount > 1 && <nav className="mk-watch-pages" aria-label={t.watchlist}>
+              <button type="button" aria-label={t.previousPage} disabled={currentPage === 0} onClick={() => setWatchPage(currentPage - 1)}>‹</button>
+              <span aria-live="polite">{t.page(currentPage + 1, pageCount)}</span>
+              <button type="button" aria-label={t.nextPage} disabled={currentPage === pageCount - 1} onClick={() => setWatchPage(currentPage + 1)}>›</button>
+            </nav>}
             <p className="mk-visually-hidden" aria-live="polite">{moveNote}</p>
           </aside>
+          </WatchlistLayer>
         </div>
       </article>
     </section>

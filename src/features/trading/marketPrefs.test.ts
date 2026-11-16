@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { defaultPrefs, readPrefs, sanitizePrefs, storageKey, writePrefs } from './marketPrefs'
+import { defaultPrefs, readPrefs, sanitizePrefs, storageKey, writePrefs, updateMarketPrefs } from './marketPrefs'
 
 afterEach(() => window.localStorage.clear())
 
 describe('market preferences', () => {
-  it('starts with HBAR on the 1 day line chart', () => {
+  it('starts with HBAR and candles for one day at an automatic interval', () => {
     expect(readPrefs()).toEqual(defaultPrefs())
-    expect(defaultPrefs()).toMatchObject({ tabs: ['hbar'], active: 'hbar', kind: 'line', range: '1D' })
+    expect(defaultPrefs()).toMatchObject({ tabs: ['hbar'], active: 'hbar', kind: 'candles', range: '1D', timeframe: 'auto' })
   })
 
   it('keeps the chosen time unit, tabs and drawings after a reload', () => {
@@ -21,7 +21,7 @@ describe('market preferences', () => {
       drawings: { btc: [{ id: 'a', kind: 'trend' as const, t1: 1, p1: 2, t2: 3, p2: 4 }] },
     }
     writePrefs(prefs)
-    expect(readPrefs()).toEqual(prefs)
+    expect(readPrefs()).toMatchObject(prefs)
   })
 
   it('drops unknown tabs, values and broken drawings instead of failing', () => {
@@ -39,9 +39,9 @@ describe('market preferences', () => {
     })
     expect(result.tabs).toEqual(['btc'])
     expect(result.active).toBe('btc')
-    expect(result.kind).toBe('line')
+    expect(result.kind).toBe('candles')
     expect(result.range).toBe('1D')
-    expect(result.timeframe).toBe('D')
+    expect(result.timeframe).toBe('auto')
     expect(result.indicators).toEqual(['sma20', 'rsi'])
     expect(Object.keys(result.drawings)).toEqual(['btc'])
     expect(result.drawings.btc).toHaveLength(1)
@@ -52,6 +52,35 @@ describe('market preferences', () => {
     expect(readPrefs()).toEqual(defaultPrefs())
     window.localStorage.setItem(storageKey, '"text"')
     expect(readPrefs()).toEqual(defaultPrefs())
+  })
+
+  it('restores the chosen view for each market after switching and reloading', () => {
+    let prefs = { ...defaultPrefs(), tabs: ['hbar', 'btc'] }
+    prefs = updateMarketPrefs(prefs, { range: '1Y' })
+    prefs = updateMarketPrefs(prefs, { active: 'btc' })
+    expect(prefs).toMatchObject({ active: 'btc', kind: 'candles', range: '1D', timeframe: 'auto' })
+    prefs = updateMarketPrefs(prefs, { kind: 'line', range: '1W' })
+    prefs = updateMarketPrefs(prefs, { active: 'hbar' })
+    expect(prefs).toMatchObject({ active: 'hbar', kind: 'candles', range: '1Y' })
+    writePrefs(prefs)
+    prefs = updateMarketPrefs(readPrefs(), { active: 'btc' })
+    expect(prefs).toMatchObject({ active: 'btc', kind: 'line', range: '1W' })
+  })
+
+  it('migrates an older deliberate line-chart choice without losing its range', () => {
+    window.localStorage.setItem(storageKey, JSON.stringify({ tabs: ['hbar', 'btc'], active: 'btc', kind: 'line', range: '1Y', timeframe: 'D' }))
+    const migrated = readPrefs()
+    expect(migrated.views.btc).toMatchObject({ kind: 'line', range: '1Y', timeframe: 'D' })
+    expect(updateMarketPrefs(updateMarketPrefs(migrated, { active: 'hbar' }), { active: 'btc' }).range).toBe('1Y')
+  })
+
+  it('retains thousands of valid saved markets and only applies the high safety cap', () => {
+    const tabs = Array.from({ length: 5001 }, (_, i) => 'yf:TEST' + i)
+    const extras = Object.fromEntries(tabs.map((id, i) => [id, { symbol: 'TEST' + i, name: 'Test ' + i, group: 'stock' }]))
+    const result = sanitizePrefs({ tabs, extras, active: tabs[4999] })
+    expect(result.tabs).toHaveLength(5000)
+    expect(result.active).toBe('yf:TEST4999')
+    expect(result.tabs).toContain('yf:TEST4999')
   })
 
   it('remembers stocks that are not quick picks together with their name, and drops what is no longer open', () => {

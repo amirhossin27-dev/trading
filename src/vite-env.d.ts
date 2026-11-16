@@ -1,2 +1,2 @@
 /// <reference types="vite/client" />
-interface Window { APP_CONFIG?: { apiBaseUrl?: string } }
+interface Window { APP_CONFIG?: { apiBaseUrl?: string; alertServiceUrl?: string } }

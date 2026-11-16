@@ -1,0 +1,25 @@
+.alarm-trigger { position:relative; display:inline-flex; align-items:center; justify-content:center; gap:6px; min-width:44px; min-height:44px; }
+.alarm-trigger svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.alarm-trigger.has-alerts { color:#e23c4c; }
+.alarm-count { position:absolute; top:0; right:0; min-width:17px; height:17px; padding:0 3px; border-radius:10px; background:#c72536; color:#fff; font-size:10px; font-weight:700; line-height:17px; }
+.alarm-dialog .tr-overlay-panel { width:min(100%,520px); overflow-y:auto; padding:calc(32px + env(safe-area-inset-top,0px)) 20px max(24px,env(safe-area-inset-bottom)); }
+.alarm-dialog h2 { padding-right:40px; margin-top:0; }
+.alarm-dialog h3 { margin:18px 0 10px; font-size:1rem; }
+.alarm-dialog p { line-height:1.5; font-size:.88rem; }
+.alarm-dialog button,.alarm-dialog select,.alarm-dialog input { font:inherit; min-height:44px; border:1px solid var(--border); border-radius:10px; padding:9px 12px; color:var(--text); background:var(--bg); }
+.alarm-dialog button:not(:disabled) { cursor:pointer; }
+.alarm-dialog button:disabled { opacity:.5; }
+.alarm-dialog button:focus-visible,.alarm-dialog input:focus-visible,.alarm-dialog select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.alarm-form { border-top:1px solid var(--border); margin-top:18px; }
+.alarm-form label { display:grid; gap:7px; margin:12px 0; font-size:.9rem; }
+.alarm-form input,.alarm-form select { width:100%; min-width:0; font-size:16px; }
+.alarm-form>button { width:100%; }
+.alarm-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.alarm-event { padding:12px 0; border-bottom:1px solid var(--border); }
+.alarm-event strong { overflow-wrap:anywhere; }
+.alarm-event p { margin:5px 0 10px; }
+.alarm-error { color:var(--negative,#c72536); }
+.alarm-small { color:var(--text-muted); font-size:.78rem!important; }
+.alarm-dialog details { margin-top:18px; }
+.alarm-dialog summary { min-height:44px; padding:10px 0; cursor:pointer; }
+@media(max-width:600px) { .alarm-trigger-label { display:none; } }

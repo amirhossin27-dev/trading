@@ -152,9 +152,9 @@
 | Checkpoint | Status | Nachweis / nächste Aktion |
 | --- | --- | --- |
 | CP0 Analyse und Planentwurf | abgeschlossen | Code und mobile Browseransicht geprüft; Nutzer nutzt Home-Bildschirm |
-| CP1 Kopfbereich | Nachbesserung umgesetzt; Geräteabnahme offen | Nutzer wünscht mehr Abstand: Zusatzabstand jetzt 32px; vier Hinweise entfernt |
-| CP2 Gesten | umgesetzt und geprüft; Geräteabnahme offen | Fortsetzung vom Nutzer freigegeben; Pinch/Pan/Abbruch geprüft; 86 Tests und Builds erfolgreich |
-| CP3 Übersicht | offen | Vorschau vor Umsetzung |
+| CP1 Kopfbereich | Nachbesserung veröffentlicht; Geräteabnahme offen | Commit 9501b29: Zusatzabstand 32px; vier Hinweise entfernt |
+| CP2 Gesten | veröffentlicht; Geräteabnahme offen | Commit 9501b29; 86 Tests und Builds erfolgreich; iPhone-Pinch/Pan als nächster Checkpoint |
+| CP3 Übersicht | drei Konzepte vorbereitet; Nutzerentscheidung offen | Seitenschieber / Kurse von unten / Chart-Fokus; Vorschau in work/etappe-3-konzepte.html |
 | CP4 Suche/Watchlist | offen | nach CP3 |
 | CP5 Datenverständlichkeit | offen | nach CP2 vorziehbar |
 | CP6 Veröffentlichung | offen | nach vereinbarten Etappen |
@@ -182,3 +182,27 @@ Veröffentlichungsnachweis (15.11.2026):
 - Die Plandatei im Git-Commit beschreibt den Stand vor Veröffentlichung; beim nächsten Arbeitsbranch diesen aktuellen lokalen Fortschrittsstand übernehmen.
 
 Fortsetzung 15.11.2026: Nutzer meldet Header zu hoch und wünscht Entfernen der vier Footer-Hinweise; Fortsetzung mit Etappe 2 freigegeben. Umsetzung und Prüfungen siehe docs/reviews/2026-11-15-chart-gestures.md. CP1/CP2 bleiben für echte Geräteabnahme offen. Noch keine Umsetzung der späteren Layout-/Such-/Datenstatus-Etappen.
+
+Aktueller Stand nach Veröffentlichung von Etappe 2 (15.11.2026):
+- Commit 9501b2972068bdaf48e1b2254a38ad3addd52029 auf main; lokale Arbeitskopie app/ auf codex/iphone-chart-gestures, sauber.
+- GitHub Actions https://github.com/amirhossin27-dev/trading/actions/runs/43717952200 erfolgreich.
+- Live geprüft bei 393px: 32px zusätzlicher oberer Abstand, vier Hinweise entfernt, Chart touch-action none, Zoomtasten 44 × 44px.
+- Ausgelieferte Assets index-xnxrMNSS.css und index-4mU5C9qP.js stimmen mit dem geprüften Produktionsbuild überein.
+- Nächste Aktion: Nutzer startet die Home-Bildschirm-App neu und bestätigt Abstand sowie Pinch/Pan/Reset und Scrollen außerhalb des Charts. Anschließend Vorschau für Etappe 3 abstimmen.
+Etappe 3 – Konzeptphase (15.11.2026):
+- Nutzer: „Viel besser“, Etappe 3 fortsetzen; Chart soll am meisten Platz bekommen. Gespeicherte Kurse sollen ein-/ausfahren und geschlossen keinen dauerhaften Platz beanspruchen. Zunächst Konzepte, Entscheidung vor Umsetzung.
+- Vorschau: work/etappe-3-konzepte.html, außerhalb des App-Repositories. Reine Beispieldaten; keine Änderung oder Veröffentlichung von App-Code.
+- Varianten: Seitenschieber (rechte Overlay-Liste), Kurse von unten (unteres Overlay-Panel, empfohlen), Chart-Fokus (größter Chart, kleine horizontale Kurs-Schnellleiste und mehr Menüs).
+- Gemeinsamer Vorschlag: kompakter Kurskopf, Safe-Area-Abstand erhalten; Overlay verändert Chartgröße nicht; nach Kurswahl standardmäßig schließen; seltene Werkzeuge auf Abruf; keine Öffnungsgeste auf der Chartfläche, damit Pan/Pinch eindeutig bleiben.
+- Noch zu entscheiden: Variante oder Kombination, Verhalten nach Kurswahl und Umfang direkt sichtbarer Steuerelemente.
+- Vorschau im Browser geprüft: Öffnen, Kurswahl, automatisches Schließen, Variantenwechsel, Chart-Typ-Menü und schmale Ansicht. Plotflächen im 740px-Konzept: Seitenschieber/unteres Panel 514px, Fokus 618px; tatsächliche Gerätefläche erst bei Implementierung messen.
+- Statische Vorschauprüfung erfolgreich: JavaScript-Syntax und statische DOM-Zugriffe. Rendering und Hauptinteraktionen separat im Browser geprüft.
+- Nächste Aktion: Nutzer wählt Konzeptbasis; anschließend abgestimmtes Design und Umsetzungsschritte für CP3 festhalten.
+
+Etappe 3 – Stand 17.11.2026:
+- Nutzer wählte Seitenschieber und bestätigte gespeicherte Ansichten, Kerzenstandard, Einstellungen unten, eine sehr hohe Kursgrenze sowie Alarme bei geschlossener App und gesperrtem iPhone.
+- Detailplan: docs/superpowers/plans/2026-11-16-sidebar-alerts.md. Serverbetrieb und Wiederherstellung: docs/alarm-service.md. Branch codex/sidebar-alerts, Basis9501b29.
+- CP3.1 lokal geprüft: Chart als Hauptfläche, rechte Overlay-Liste mit Filter und20er-Seiten,5000Kurse, Ansichten je Instrument, untere Einstellungen. 390×844: Chart344×614;320×568 ohne Seitenüberlauf. Alarm-Sprung zeigt Wochenkerzen und Zielmarkierung; nur ausdrückliches Bestätigen entfernt die rote Meldung.
+- CP3.2 bereitgestellt: bestätigtes Supabase-Free-Projekt uhnepfdhqxwytkaebhlf (Live Scores), vier Migrationen, sieben geschützte Vault-Werte, Edge Function Version1, ein Minuten-Cronjob. Mehrere HTTP200-Prüfläufe, zehn Live-API-Prüfungen und zurückgerollter PostgreSQL-Lifecycle-Test erfolgreich. Keine privaten Schlüssel in Frontend/Git.
+- Prüfung:36Node+111Frontend+2Deno-Tests; Web- und .NET-Release-Build bestanden. Unabhängige Review-Befunde zu langsamen Quellen, vollständiger Alarmansicht und Fokus wurden mit Regressionstests korrigiert; erneute Prüfung ohne offenen konkreten Befund.
+- Veröffentlichung der Oberfläche wird vorbereitet. Nächster gemeinsamer Checkpoint CP3.3: auf dem iPhone Mitteilungen aktivieren, Testmitteilung und Schwellenalarm bei gesperrtem Bildschirm prüfen, rote Glocke/1W-Sprung/Bestätigung/Neustart abnehmen. Tatsächliche Handy-Zustellung ist noch nicht als erfolgreich markiert. CP4/CP5 erst nach der vereinbarten Abnahme beginnen.

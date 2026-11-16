@@ -40,6 +40,14 @@ function setup(tool: Tool = 'cursor', data = candles) {
 }
 
 describe('PriceChart gestures', () => {
+  it('marks an alarm target without adding a drawing or changing the visible candle prices', () => {
+    const chart = setup()
+    chart.rerender(<PriceChart {...chart.props} alarmTarget={{ price: 1000, label: 'Alarm · 1000 USD' }} />)
+    expect(document.querySelector('.mk-alarm-target')?.textContent).toContain('1000 USD')
+    expect(document.querySelector('.mk-alarm-target line')).toBeTruthy()
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+  })
+
   it.each(['trend', 'fib', 'measure'] as const)('shows a live %s preview before committing a touch drawing', (tool) => {
     const chart = setup(tool)
     chart.touch('pointerDown', 1, 200)

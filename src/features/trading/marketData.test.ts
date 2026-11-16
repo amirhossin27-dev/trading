@@ -17,6 +17,12 @@ const urlOf = (call: unknown[]) => String(call[0])
 afterEach(() => vi.unstubAllGlobals())
 
 describe('series', () => {
+  it('shows the selected history range for automatic candles on both sources', () => {
+    expect(seriesSpec('candles', '1W', 'auto')).toMatchObject({ interval: '30m', visible: 336 })
+    expect(seriesSpec('candles', '1Y', 'auto')).toMatchObject({ interval: '1d', visible: 365 })
+    expect(seriesSpec('candles', '1W', 'auto', 'yahoo')).toMatchObject({ interval: '15m', visible: 140 })
+  })
+
   it('uses another candle length per chart type and time unit', () => {
     expect(seriesSpec('line', '1M', '4h')).toMatchObject({ interval: '2h', limit: 360 })
     expect(seriesSpec('candles', '1M', '4h')).toMatchObject({ interval: '4h', limit: 360, visible: 120 })
@@ -111,6 +117,16 @@ describe('exchange markets (Yahoo through the platform API)', () => {
   const apiCandles = (count: number, step: number, from = session) => Array.from({ length: count }, (_, index) => (
     { t: from + index * step, o: 100 + index, h: 101 + index, l: 99 + index, c: 100.5 + index, v: 10 }
   ))
+
+  it('loads all 21 visible exchange markets without exceeding the API limit of 20', async () => {
+    const markets: YahooAsset[] = Array.from({ length: 21 }, (_, index) => ({ ...sap, id: `yf:TEST${index}`, yahoo: `TEST${index}` }))
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const symbols = new URL(String(input), 'https://example.com').searchParams.get('symbols')!.split(',')
+      if (symbols.length > 20) return new Response('too many symbols', { status: 400 })
+      return Response.json(symbols.map((symbol) => ({ symbol, price: 100, changePct: 1, currency: 'EUR' })))
+    }))
+    expect(Object.keys(await loadQuotes(markets))).toHaveLength(21)
+  })
 
   it('counts ranges in trading days: a day is the last session, a week 15-minute candles', () => {
     expect(seriesSpec('line', '1D', 'D', 'yahoo')).toMatchObject({ interval: '5m', yahoo: { fetch: '5m', lastSession: true } })
