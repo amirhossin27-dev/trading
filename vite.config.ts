@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 export default defineConfig({
  base: './', plugins: [react(), {name:'offline-shell', generateBundle(_options,bundle) {
- const assets=['./','./index.html','./manifest.webmanifest','./alert-worker.js','./icons/icon-192.png','./icons/icon-512.png','./icons/apple-touch-icon.png',...Object.keys(bundle).filter(p=>p.startsWith('assets/')).map(p=>'./'+p)];
+ const assets=['./','./index.html','./manifest.webmanifest','./alert-worker.js','./icons/icon-192.png','./icons/icon-512.png','./icons/apple-touch-icon.png','./icons/favicon.svg','./icons/favicon.ico','./icons/favicon-16.png','./icons/favicon-32.png',...Object.keys(bundle).filter(p=>p.startsWith('assets/')).map(p=>'./'+p)];
  const version=process.env.GITHUB_SHA ?? String(Date.now());
  this.emitFile({type:'asset',fileName:'sw.js',source:`importScripts(new URL('alert-worker.js',self.registration.scope).href);
 const CACHE='${pkgName}-${version}'; const ASSETS=${JSON.stringify(assets)};
