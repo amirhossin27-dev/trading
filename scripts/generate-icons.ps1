@@ -42,6 +42,10 @@ function New-IconPng {
         $attributes = [System.Drawing.Imaging.ImageAttributes]::new()
         $stream = [System.IO.MemoryStream]::new()
         try {
+            if (-not $Rounded) {
+                $background = $source.SelectSingleNode('//*[@data-background="true"]')
+                $outputGraphics.Clear([System.Drawing.ColorTranslator]::FromHtml($background.GetAttribute('fill')))
+            }
             $outputGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
             $outputGraphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
             $attributes.SetWrapMode([System.Drawing.Drawing2D.WrapMode]::TileFlipXY)
