@@ -41,11 +41,53 @@ const SLOP = 8
 const DOUBLE_TAP_MS = 320
 /** Smallest gap (px) between two time labels. */
 const LABEL_GAP = 6
+/** A finger is wider than a mouse pointer: lines and their end points are easier to catch by touch. */
+const TOUCH_HIT_DISTANCE = 14
+const HANDLE_HIT = { mouse: 9, touch: 22 }
+/** Dragging an axis by this many pixels stretches or compresses it by the factor e. */
+const AXIS_DRAG = 220
+const MIN_PRICE_SCALE = 0.05
+const MAX_PRICE_SCALE = 20
 
 interface View {
   count: number
   /** Candles the chart is scrolled back from the newest one. */
   shift: number
+}
+
+/**
+ * The price axis as the user stretched or moved it, relative to the automatic range of the visible candles:
+ * `scale` multiplies its height and `offset` moves its centre (in automatic heights). 1 and 0 mean automatic.
+ */
+interface PriceView {
+  scale: number
+  offset: number
+}
+
+const autoPrice: PriceView = { scale: 1, offset: 0 }
+
+type Part = 'p1' | 'p2' | 'body'
+
+/** A drawing being dragged: by an end point or as a whole. */
+interface Edit {
+  id: string
+  part: Part
+  start: { x: number; y: number }
+  original: Drawing
+  moved: boolean
+  draft: Drawing | null
+}
+
+/** A finger or the mouse dragging the time axis (x) or the price axis (y). */
+interface AxisDrag {
+  axis: 'x' | 'y'
+  pointerId: number
+  touch: boolean
+  start: { x: number; y: number }
+  count: number
+  shift: number
+  scale: number
+  moved: boolean
 }
 
 interface Anchor {
@@ -285,7 +327,16 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [panning, setPanning] = useState(false)
   const [lastTool, setLastTool] = useState(tool)
-  const panRef = useRef<{ x: number; shift: number } | null>(null)
+  const [priceView, setPriceView] = useState<PriceView>(autoPrice)
+  /** The dragged drawing as it looks right now; it replaces the stored one until the finger or mouse lets go. */
+  const [draft, setDraft] = useState<Drawing | null>(null)
+  /** What the mouse is over in the cursor tool, for the pointer shape. */
+  const [grab, setGrab] = useState<Part | null>(null)
+  const [scaling, setScaling] = useState<'x' | 'y' | null>(null)
+  const editRef = useRef<Edit | null>(null)
+  const axisRef = useRef<AxisDrag | null>(null)
+  const axisTapRef = useRef<{ axis: 'x' | 'y'; time: number } | null>(null)
+  const panRef = useRef<{ x: number; y: number; shift: number; offset: number } | null>(null)
   const downRef = useRef<{ x: number; y: number } | null>(null)
   const touchesRef = useRef(new Map<number, { x: number; y: number }>())
   const multiTouchRef = useRef(false)
@@ -315,6 +366,8 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     downRef.current = null
     stopHold()
     stickyRef.current = false
+    editRef.current = null
+    setDraft(null)
     setPanning(false)
   }
 
@@ -348,7 +401,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   }, [])
 
   useEffect(() => {
-    if (touchesRef.current.size || panRef.current) cancelInteraction()
+    if (touchesRef.current.size || panRef.current || editRef.current || axisRef.current) cancelInteraction()
   }, [size.w, size.h])
 
   useEffect(() => () => stopHold(), [])
@@ -391,6 +444,15 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   const padding = (hi - lo || Math.abs(hi) * 0.02 || 1) * 0.08
   lo -= padding
   hi += padding
+  // A stretched or moved price axis keeps following the candles in time, so panning never loses them for good.
+  const autoSpan = hi - lo
+  const manualPrice = priceView.scale !== 1 || priceView.offset !== 0
+  if (manualPrice) {
+    const center = (lo + hi) / 2 + priceView.offset * autoSpan
+    const span = autoSpan * priceView.scale
+    lo = center - span / 2
+    hi = center + span / 2
+  }
   const layout: Layout = { from, to, step, plotW, mainTop: PAD_T, mainH, lo, hi }
   const yOf = (price: number) => PAD_T + ((hi - price) / (hi - lo)) * mainH
   const priceAtY = (y: number) => hi - ((y - PAD_T) / mainH) * (hi - lo)
@@ -422,15 +484,48 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     return { x1: xOf(timeToIndex(times, drawing.t1)), y1: yOf(drawing.p1), x2: xOf(timeToIndex(times, drawing.t2)), y2: yOf(drawing.p2) }
   }
 
-  function hits(drawing: Drawing, x: number, y: number) {
+  function hits(drawing: Drawing, x: number, y: number, tolerance = HIT_DISTANCE) {
     const { x1, y1, x2, y2 } = locate(drawing)
-    if (drawing.kind === 'hline') return Math.abs(y - y1) <= HIT_DISTANCE
-    if (drawing.kind === 'trend') return distanceToSegment(x, y, x1, y1, x2, y2) <= HIT_DISTANCE
-    if (x < Math.min(x1, x2) - HIT_DISTANCE) return false
-    return fibonacciLevels.some((level) => Math.abs(y - yOf(fibonacciPrice(drawing.p1, drawing.p2, level))) <= HIT_DISTANCE)
+    if (drawing.kind === 'hline') return Math.abs(y - y1) <= tolerance
+    if (drawing.kind === 'trend') return distanceToSegment(x, y, x1, y1, x2, y2) <= tolerance
+    if (x < Math.min(x1, x2) - tolerance) return false
+    return fibonacciLevels.some((level) => Math.abs(y - yOf(fibonacciPrice(drawing.p1, drawing.p2, level))) <= tolerance)
+      || distanceToSegment(x, y, x1, y1, x2, y2) <= tolerance
   }
 
-  const selected = drawings.find((item) => item.id === selectedId) ?? null
+  /** The drawing part under a point: an end point first (the selected drawing wins), otherwise the line itself. */
+  function grabAt(x: number, y: number, touch: boolean): { drawing: Drawing; part: Part } | null {
+    const ordered = [...drawings].reverse().sort((a, b) => Number(b.id === selectedId) - Number(a.id === selectedId))
+    const reach = touch ? HANDLE_HIT.touch : HANDLE_HIT.mouse
+    let best: { drawing: Drawing; part: Part; distance: number } | null = null
+    for (const drawing of ordered) {
+      if (drawing.kind === 'hline') continue
+      const { x1, y1, x2, y2 } = locate(drawing)
+      for (const [part, px, py] of [['p1', x1, y1], ['p2', x2, y2]] as const) {
+        const distance = Math.hypot(x - px, y - py)
+        if (distance <= reach && (!best || distance < best.distance - 0.5)) best = { drawing, part, distance }
+      }
+    }
+    if (best) return { drawing: best.drawing, part: best.part }
+    const tolerance = touch ? TOUCH_HIT_DISTANCE : HIT_DISTANCE
+    const body = ordered.find((drawing) => hits(drawing, x, y, tolerance))
+    return body ? { drawing: body, part: 'body' } : null
+  }
+
+  /** The drawing after its end point or the whole of it moved by (dx, dy) pixels on screen. */
+  function movedDrawing(original: Drawing, part: Part, dx: number, dy: number): Drawing {
+    const slide = (t: number, p: number) => ({ t: indexToTime(times, timeToIndex(times, t) + dx / step), p: priceAtY(yOf(p) + dy) })
+    if (original.kind === 'hline') {
+      const p = priceAtY(yOf(original.p1) + dy)
+      return { ...original, p1: p, p2: p }
+    }
+    const first = part === 'p2' ? { t: original.t1, p: original.p1 } : slide(original.t1, original.p1)
+    const second = part === 'p1' ? { t: original.t2, p: original.p2 } : slide(original.t2, original.p2)
+    return { ...original, t1: first.t, p1: first.p, t2: second.t, p2: second.p }
+  }
+
+  const shownDrawings = draft ? drawings.map((item) => (item.id === draft.id ? draft : item)) : drawings
+  const selected = shownDrawings.find((item) => item.id === selectedId) ?? null
   const activePending = pending && pending.tool === tool ? pending : null
 
   // ---- interaction ----
@@ -458,8 +553,102 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     setViewClamped({ count: nextCount, shift: count + MARGIN - (nextFrom + nextCount) })
   }
 
-  function resetView() {
+  function resetTime() {
     setView({ count: Math.min(visible, count) + MARGIN, shift: 0 })
+  }
+
+  function resetView() {
+    resetTime()
+    setPriceView(autoPrice)
+  }
+
+  /** Follows a dragging finger or mouse: always in time, and up and down too once the price axis was changed by hand. */
+  function panTo(point: { x: number; y: number }) {
+    const pan = panRef.current
+    if (!pan) return
+    setViewClamped({ count: viewCount, shift: pan.shift + (point.x - pan.x) / step })
+    if (manualPrice) setPriceView((current) => ({ ...current, offset: pan.offset + ((point.y - pan.y) * current.scale) / mainH }))
+  }
+
+  function startPan(point: { x: number; y: number }) {
+    panRef.current = { x: point.x, y: point.y, shift, offset: priceView.offset }
+    setPanning(true)
+  }
+
+  function startEdit(grabbed: { drawing: Drawing; part: Part }, point: { x: number; y: number }) {
+    editRef.current = { id: grabbed.drawing.id, part: grabbed.part, start: point, original: grabbed.drawing, moved: false, draft: null }
+  }
+
+  function dragEdit(point: { x: number; y: number }, slop: number) {
+    const edit = editRef.current
+    if (!edit) return
+    const dx = point.x - edit.start.x
+    const dy = point.y - edit.start.y
+    if (!edit.moved && Math.hypot(dx, dy) <= slop) return
+    edit.moved = true
+    edit.draft = movedDrawing(edit.original, edit.part, dx, dy)
+    setDraft(edit.draft)
+  }
+
+  function finishEdit() {
+    const edit = editRef.current
+    editRef.current = null
+    setDraft(null)
+    if (edit?.moved && edit.draft) {
+      const next = edit.draft
+      onDrawingsChange(drawings.map((item) => (item.id === next.id ? next : item)))
+    }
+  }
+
+  function handleAxisDown(axis: 'x' | 'y', event: PointerEvent<SVGRectElement>) {
+    if ((event.pointerType !== 'touch' && event.button !== 0) || count < 2 || axisRef.current || touchesRef.current.size || panRef.current || editRef.current) return
+    capture(event)
+    stopHold()
+    hideCross()
+    axisRef.current = { axis, pointerId: event.pointerId, touch: event.pointerType === 'touch', start: localPoint(event), count: viewCount, shift, scale: priceView.scale, moved: false }
+  }
+
+  function handleAxisMove(event: PointerEvent<SVGRectElement>) {
+    const drag = axisRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const point = localPoint(event)
+    const dx = point.x - drag.start.x
+    const dy = point.y - drag.start.y
+    if (!drag.moved && Math.hypot(dx, dy) <= (drag.touch ? 4 : 2)) return
+    if (!drag.moved) setScaling(drag.axis)
+    drag.moved = true
+    // Time axis: drag right for wider candles, left for more of them; the newest candle keeps its place.
+    if (drag.axis === 'x') setViewClamped({ count: drag.count * Math.exp(-dx / AXIS_DRAG), shift: drag.shift })
+    // Price axis: drag down to compress, up to stretch, around the middle of the chart.
+    else setPriceView((current) => ({ ...current, scale: clamp(drag.scale * Math.exp(dy / AXIS_DRAG), MIN_PRICE_SCALE, MAX_PRICE_SCALE) }))
+  }
+
+  function handleAxisUp(event: PointerEvent<SVGRectElement>) {
+    const drag = axisRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    axisRef.current = null
+    setScaling(null)
+    capture(event, true)
+    if (drag.moved) return
+    // A double tap on an axis puts just that axis back to automatic.
+    const now = Date.now()
+    const tap = axisTapRef.current
+    if (tap && tap.axis === drag.axis && now - tap.time < DOUBLE_TAP_MS) {
+      axisTapRef.current = null
+      if (drag.axis === 'x') resetTime()
+      else setPriceView(autoPrice)
+    } else axisTapRef.current = { axis: drag.axis, time: now }
+  }
+
+  function handleAxisCancel(event: PointerEvent<SVGRectElement>) {
+    if (axisRef.current?.pointerId !== event.pointerId) return
+    axisRef.current = null
+    setScaling(null)
+  }
+
+  /** The ruler is always exactly vertical: it measures price from its first point, at that point's time. */
+  function ruler(a: Anchor, b: Anchor) {
+    return { a, b: { t: a.t, p: b.p } }
   }
 
   function finishDrawing(kindOfDrawing: 'trend' | 'fib', a: Anchor, b: Anchor) {
@@ -522,6 +711,10 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     touchBoxRef.current = null
     panRef.current = null
     downRef.current = null
+    editRef.current = null
+    axisRef.current = null
+    setDraft(null)
+    setScaling(null)
     setPending(null)
     setPanning(false)
     setPointer(null)
@@ -529,7 +722,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   }
 
   function handleDown(event: PointerEvent<SVGRectElement>) {
-    if ((event.pointerType !== 'touch' && event.button !== 0) || count < 2) return
+    if ((event.pointerType !== 'touch' && event.button !== 0) || count < 2 || axisRef.current) return
     const point = localPoint(event)
     if (event.pointerType === 'touch') {
       capture(event)
@@ -543,6 +736,9 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         touchPendingRef.current = null
         panRef.current = null
         downRef.current = null
+        // A second finger zooms instead: a line that was being dragged goes back to where it was.
+        editRef.current = null
+        setDraft(null)
         setPending(null)
         setMeasure(null)
         setSelectedId(null)
@@ -562,10 +758,14 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         return
       }
       const inMainArea = point.y >= PAD_T && point.y <= PAD_T + mainH
-      const hit = inMainArea && !stickyRef.current ? [...drawings].reverse().find((item) => hits(item, point.x, point.y)) : undefined
-      setSelectedId(hit?.id ?? null)
+      const grabbed = inMainArea && !stickyRef.current ? grabAt(point.x, point.y, true) : null
+      setSelectedId(grabbed?.drawing.id ?? null)
       stopHold()
-      if (hit) return
+      // A finger on a line selects it and, once it moves, drags the line or the end point it holds.
+      if (grabbed) {
+        startEdit(grabbed, point)
+        return
+      }
       const sticky = stickyRef.current
       const hold: Hold = { start: point, last: point, mode: 'wait', sticky, timer: 0 }
       hold.timer = sticky ? 0 : window.setTimeout(() => {
@@ -581,13 +781,11 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     const inMain = point.y >= PAD_T && point.y <= PAD_T + mainH
 
     if (tool === 'cursor') {
-      const hit = inMain ? [...drawings].reverse().find((item) => hits(item, point.x, point.y)) : undefined
-      setSelectedId(hit?.id ?? null)
-      if (!hit) {
-        panRef.current = { x: point.x, shift }
-        setPanning(true)
-        capture(event)
-      }
+      const grabbed = inMain ? grabAt(point.x, point.y, false) : null
+      setSelectedId(grabbed?.drawing.id ?? null)
+      if (grabbed) startEdit(grabbed, point)
+      else startPan(point)
+      capture(event)
       return
     }
     if (!inMain) return
@@ -601,7 +799,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     }
     if (tool === 'measure') {
       if (activePending) {
-        setMeasure({ a: activePending.a, b: anchor })
+        setMeasure(ruler(activePending.a, anchor))
         setPending(null)
       } else {
         setMeasure(null)
@@ -637,17 +835,20 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         setViewClamped({ count: nextCount, shift: count + MARGIN - nextFrom - nextCount })
         return
       }
+      if (editRef.current) {
+        dragEdit(point, SLOP)
+        return
+      }
       const hold = holdRef.current
       if (hold) {
         hold.last = point
         if (hold.mode === 'wait' && Math.hypot(point.x - hold.start.x, point.y - hold.start.y) > SLOP) {
           window.clearTimeout(hold.timer)
           if (hold.sticky) hold.mode = 'cross'
+          // The chart follows the finger from where it first touched.
           else {
             hold.mode = 'pan'
-            // The chart follows the finger from where it first touched.
-            panRef.current = { x: hold.start.x, shift }
-            setPanning(true)
+            startPan(hold.start)
           }
         }
         if (hold.mode === 'cross') {
@@ -656,7 +857,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         }
       }
       // No crosshair while a finger pans: it would jump around under the finger.
-      if (panRef.current) setViewClamped({ count: viewCount, shift: panRef.current.shift + (point.x - panRef.current.x) / step })
+      if (panRef.current) panTo(point)
       else if (tool !== 'cursor') {
         setPointer(point)
         setHover(hoverIndexAt(point.x))
@@ -665,7 +866,15 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     }
     setPointer(point)
     setHover(hoverIndexAt(point.x))
-    if (panRef.current) setViewClamped({ count: viewCount, shift: panRef.current.shift + (point.x - panRef.current.x) / step })
+    if (editRef.current) {
+      dragEdit(point, 2)
+      return
+    }
+    if (panRef.current) panTo(point)
+    else if (tool === 'cursor' && event.buttons === 0) {
+      const over = point.y >= PAD_T && point.y <= PAD_T + mainH ? grabAt(point.x, point.y, false) : null
+      setGrab(over?.part ?? null)
+    }
   }
 
   function handleUp(event: PointerEvent<SVGRectElement>) {
@@ -679,7 +888,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         if (touchesRef.current.size >= 2) beginPinch()
         else {
           const [remaining] = touchesRef.current.values()
-          if (remaining && tool === 'cursor') panRef.current = { x: remaining.x, shift }
+          if (remaining && tool === 'cursor') panRef.current = { x: remaining.x, y: remaining.y, shift, offset: priceView.offset }
           setPanning(Boolean(remaining && tool === 'cursor'))
           if (!remaining) multiTouchRef.current = false
         }
@@ -694,6 +903,10 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         panRef.current = null
         setPanning(false)
         capture(event, true)
+        if (editRef.current) {
+          finishEdit()
+          return
+        }
         if (hold?.mode === 'cross') {
           // The crosshair stays where the finger left it; a tap hides it again.
           stickyRef.current = true
@@ -731,13 +944,19 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
       } else if (previousPending || Math.hypot(point.x - down.x, point.y - down.y) > 8) {
         const a = previousPending?.a ?? anchorAt(down)
         if (tool === 'measure') {
-          setMeasure({ a, b: anchor })
+          setMeasure(ruler(a, anchor))
           setPending(null)
         } else finishDrawing(tool, a, anchor)
       } else {
         setMeasure(null)
         setPending({ tool, a: anchor })
       }
+      return
+    }
+    if (editRef.current) {
+      finishEdit()
+      downRef.current = null
+      capture(event, true)
       return
     }
     if (panRef.current) {
@@ -751,7 +970,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     if (down && activePending && (tool === 'trend' || tool === 'fib' || tool === 'measure') && Math.hypot(point.x - down.x, point.y - down.y) > 8) {
       const anchor = anchorAt(point)
       if (tool === 'measure') {
-        setMeasure({ a: activePending.a, b: anchor })
+        setMeasure(ruler(activePending.a, anchor))
         setPending(null)
       } else {
         finishDrawing(tool, activePending.a, anchor)
@@ -761,9 +980,10 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
 
   function handleLeave(event: PointerEvent<SVGRectElement>) {
     // A lifted finger also "leaves"; the touch crosshair is ended by a tap instead.
-    if (event.pointerType === 'touch' || panRef.current) return
+    if (event.pointerType === 'touch' || panRef.current || editRef.current) return
     setPointer(null)
     setHover(null)
+    setGrab(null)
   }
 
   function removeDrawing(id: string) {
@@ -782,6 +1002,13 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     if ((event.key === 'Delete' || event.key === 'Backspace') && selected) {
       event.preventDefault()
       removeDrawing(selected.id)
+      return
+    }
+    // The selected line also moves with the arrow keys up and down.
+    if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && selected) {
+      event.preventDefault()
+      const next = movedDrawing(selected, 'body', 0, event.key === 'ArrowUp' ? -4 : 4)
+      onDrawingsChange(drawings.map((item) => (item.id === next.id ? next : item)))
       return
     }
     if (count < 2) return
@@ -822,7 +1049,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   // The current price stays readable: when its badge sits where the buttons are, they move to the top.
   const zoomTop = lastY !== null && lastY > zoomLow - 12 && lastY < zoomLow + zoomH + 12 ? PAD_T + 4 : zoomLow
   const underZoom = (y: number) => y > zoomTop - 9 && y < zoomTop + zoomH + 9
-  const viewChanged = Math.abs(viewCount - (Math.min(visible, count) + MARGIN)) > 0.01 || shift > 0.01
+  const viewChanged = Math.abs(viewCount - (Math.min(visible, count) + MARGIN)) > 0.01 || shift > 0.01 || manualPrice
 
   const priceTicks = niceTicks(lo, hi, Math.max(2, Math.floor(mainH / 48)))
   const axis = timeTicks(indexToTime(times, from), indexToTime(times, to), Math.max(2, Math.floor(plotW / 42)))
@@ -869,23 +1096,18 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   const shownChange = shown && previousClose ? (shown.c - previousClose) / previousClose : 0
   const lastRising = last ? last.c >= last.o : true
 
-  function formatSpan(ms: number) {
-    const abs = Math.abs(ms)
-    if (abs >= 2 * day) return `${Math.round(abs / day)} ${labels.units.day}`
-    if (abs >= day) return `${(abs / day).toFixed(1)} ${labels.units.day}`
-    const hours = Math.floor(abs / 3_600_000)
-    const minutes = Math.round((abs % 3_600_000) / 60_000)
-    return hours > 0 ? `${hours} ${labels.units.hour}${minutes ? ` ${minutes} ${labels.units.minute}` : ''}` : `${minutes} ${labels.units.minute}`
-  }
-
   function renderDrawing(drawing: Drawing, preview = false) {
     const { x1, y1, x2, y2 } = locate(drawing)
     const isSelected = drawing.id === selectedId
-    const className = `mk-drawing is-${drawing.kind}${isSelected ? ' is-selected' : ''}${preview ? ' is-preview' : ''}`
+    const isDragged = drawing.id === draft?.id
+    const className = `mk-drawing is-${drawing.kind}${isSelected ? ' is-selected' : ''}${preview ? ' is-preview' : ''}${isDragged ? ' is-dragged' : ''}`
+    // A selected line shows larger end points: they can be dragged.
+    const handle = (cx: number, cy: number) => <circle cx={cx} cy={cy} r={isSelected ? 5.5 : 3} className={isSelected ? 'mk-handle' : undefined} />
     if (drawing.kind === 'hline') {
       return (
         <g key={drawing.id} className={className}>
           <line x1={PAD_L} x2={PAD_L + plotW} y1={y1} y2={y1} />
+          {isSelected && <circle cx={PAD_L + plotW / 2} cy={y1} r={5.5} className="mk-handle" />}
           <Badge x={PAD_L + plotW + 4} y={y1} text={fmt.format(drawing.p1)} anchor="start" tone="var(--accent)" />
         </g>
       )
@@ -894,8 +1116,8 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
       return (
         <g key={drawing.id} className={className}>
           <line x1={x1} y1={y1} x2={x2} y2={y2} />
-          <circle cx={x1} cy={y1} r={isSelected ? 4 : 3} />
-          <circle cx={x2} cy={y2} r={isSelected ? 4 : 3} />
+          {handle(x1, y1)}
+          {handle(x2, y2)}
         </g>
       )
     }
@@ -913,36 +1135,54 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
             </g>
           )
         })}
-        <circle cx={x1} cy={y1} r={isSelected ? 4 : 3} />
-        <circle cx={x2} cy={y2} r={isSelected ? 4 : 3} />
+        {handle(x1, y1)}
+        {handle(x2, y2)}
       </g>
     )
   }
 
   function removeHandlePosition(drawing: Drawing) {
     const { x1, y1, x2, y2 } = locate(drawing)
-    const x = drawing.kind === 'hline' ? PAD_L + 28 : clamp((x1 + x2) / 2, PAD_L + 14, PAD_L + plotW - 14)
+    const x = drawing.kind === 'hline' ? PAD_L + 28 : (x1 + x2) / 2
     const y = drawing.kind === 'hline' ? y1 : drawing.kind === 'trend' ? (y1 + y2) / 2 : Math.min(y1, y2)
-    return { left: x, top: clamp(y - 16, PAD_T, PAD_T + mainH - 22) }
+    // Beside the line, at a right angle to it, so that a finger grabbing the line to move it never lands on the delete button.
+    const length = Math.hypot(x2 - x1, y2 - y1)
+    let nx = drawing.kind === 'trend' && length > 0 ? (y2 - y1) / length : 0
+    let ny = drawing.kind === 'trend' && length > 0 ? -(x2 - x1) / length : -1
+    if (ny > 0) {
+      nx = -nx
+      ny = -ny
+    }
+    const away = 30
+    // Below the line when there is no room above it.
+    if (y + ny * away - 12 < PAD_T) {
+      nx = -nx
+      ny = -ny
+    }
+    return { left: clamp(x + nx * away, PAD_L + 14, PAD_L + plotW - 14), top: clamp(y + ny * away - 12, PAD_T, PAD_T + mainH - 24) }
   }
 
-  const measureLine = measure ?? (activePending && tool === 'measure' && pointer ? { a: activePending.a, b: anchorAt(pointer) } : null)
+  const measureLine = measure ?? (activePending && tool === 'measure' && pointer ? ruler(activePending.a, anchorAt(pointer)) : null)
   const measureLayer = measureLine && (() => {
-    const ax = xOf(timeToIndex(times, measureLine.a.t))
+    // Exactly vertical: one time, two prices.
+    const x = xOf(timeToIndex(times, measureLine.a.t))
     const ay = yOf(measureLine.a.p)
-    const bx = xOf(timeToIndex(times, measureLine.b.t))
     const by = yOf(measureLine.b.p)
     const delta = measureLine.b.p - measureLine.a.p
     const ratio = measureLine.a.p !== 0 ? delta / measureLine.a.p : 0
-    const bars = Math.round(Math.abs(timeToIndex(times, measureLine.b.t) - timeToIndex(times, measureLine.a.t)))
-    const text = `${percent.format(ratio)} · ${delta >= 0 ? '+' : '−'}${fmt.format(Math.abs(delta))} · ${bars} ${labels.bars} · ${formatSpan(measureLine.b.t - measureLine.a.t)}`
+    const text = `${percent.format(ratio).replace('-', '−')} · ${delta >= 0 ? '+' : '−'}${fmt.format(Math.abs(delta))}`
     const width = text.length * 6.2 + 14
-    const boxX = clamp((ax + bx) / 2 - width / 2, PAD_L + 2, PAD_L + plotW - width - 2)
-    const boxY = clamp(by < ay ? by - 30 : by + 12, PAD_T + 2, PAD_T + mainH - 22)
+    const right = x + 10 + width <= PAD_L + plotW - 2
+    const boxX = right ? x + 10 : clamp(x - 10 - width, PAD_L + 2, PAD_L + plotW - width - 2)
+    const boxY = clamp(by - 10, PAD_T + 2, PAD_T + mainH - 22)
+    const arrow = by < ay ? 1 : -1
     return (
       <g className={`mk-measure ${delta >= 0 ? 'is-up' : 'is-down'}`} pointerEvents="none">
-        <rect x={Math.min(ax, bx)} y={Math.min(ay, by)} width={Math.abs(bx - ax)} height={Math.abs(by - ay)} className="mk-measure-area" />
-        <line x1={ax} y1={ay} x2={bx} y2={by} />
+        <rect x={x - 7} y={Math.min(ay, by)} width={14} height={Math.abs(by - ay)} className="mk-measure-area" />
+        <line x1={x} y1={ay} x2={x} y2={by} />
+        <line x1={x - 7} y1={ay} x2={x + 7} y2={ay} />
+        <line x1={x - 7} y1={by} x2={x + 7} y2={by} />
+        {Math.abs(by - ay) > 10 && <path d={`M${x - 4} ${by + arrow * 6}L${x} ${by}L${x + 4} ${by + arrow * 6}`} className="mk-measure-arrow" />}
         <rect x={boxX} y={boxY} width={width} height={20} rx={5} className="mk-measure-box" />
         <text x={boxX + width / 2} y={boxY + 14} textAnchor="middle">{text}</text>
       </g>
@@ -970,7 +1210,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   const crossCoversZoom = crossPrice !== null && pointer !== null && underZoom(pointer.y)
 
   return (
-    <div className={`mk-chart${tool !== 'cursor' ? ' is-drawing' : ''}${panning ? ' is-panning' : ''}`} ref={wrapRef}>
+    <div className={`mk-chart${tool !== 'cursor' ? ' is-drawing' : ''}${panning ? ' is-panning' : ''}${draft || (grab && tool === 'cursor') ? ' is-over-drawing' : ''}${scaling ? ` is-scaling-${scaling}` : ''}`} ref={wrapRef}>
       <div className="mk-chart-focus" role="img" aria-label={`${labels.close}: ${last ? fmt.format(last.c) : '–'}`} tabIndex={0} onKeyDown={handleKey} onBlur={() => { setHover(null); setPointer(null) }}>
         <svg ref={svgRef} width={size.w} height={size.h} viewBox={`0 0 ${size.w} ${size.h}`} aria-hidden="true">
           <defs>
@@ -1012,12 +1252,15 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
           </g>}
 
           <g clipPath={`url(#${clipId})`} pointerEvents="none">
-            {drawings.map((drawing) => renderDrawing(drawing))}
+            {shownDrawings.map((drawing) => renderDrawing(drawing))}
             {previewDrawing && renderDrawing(previewDrawing, true)}
             {measureLayer}
           </g>
 
-          <rect className="mk-hit" x={PAD_L} y={0} width={plotW} height={plotBottom} onPointerDown={handleDown} onPointerMove={handleMove} onPointerUp={handleUp} onPointerCancel={handleCancel} onLostPointerCapture={handleCancel} onPointerLeave={handleLeave} onDoubleClick={() => { if (tool === 'cursor') resetView() }} />
+          <rect className="mk-hit" x={PAD_L} y={0} width={plotW} height={plotBottom} onPointerDown={handleDown} onPointerMove={handleMove} onPointerUp={handleUp} onPointerCancel={handleCancel} onLostPointerCapture={handleCancel} onPointerLeave={handleLeave} onDoubleClick={() => { if (tool === 'cursor' && !selected) resetView() }} />
+          {/* Swiping along an axis stretches or compresses it, as in the big trading apps. */}
+          <rect className="mk-hit-axis is-y" x={PAD_L + plotW} y={0} width={Math.max(0, size.w - PAD_L - plotW)} height={PAD_T + mainH} onPointerDown={(event) => handleAxisDown('y', event)} onPointerMove={handleAxisMove} onPointerUp={handleAxisUp} onPointerCancel={handleAxisCancel} onLostPointerCapture={handleAxisCancel} />
+          <rect className="mk-hit-axis is-x" x={PAD_L} y={plotBottom} width={plotW} height={Math.max(0, size.h - plotBottom)} onPointerDown={(event) => handleAxisDown('x', event)} onPointerMove={handleAxisMove} onPointerUp={handleAxisUp} onPointerCancel={handleAxisCancel} onLostPointerCapture={handleAxisCancel} />
 
           {crossX !== null && count >= 2 && (
             <g pointerEvents="none" className="mk-cross">
@@ -1061,7 +1304,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         )}
       </div>
 
-      {selected && tool === 'cursor' && (
+      {selected && tool === 'cursor' && !draft && (
         <button type="button" className="mk-remove" style={removeHandlePosition(selected)} aria-label={labels.removeDrawing} title={labels.removeDrawing} onClick={() => removeDrawing(selected.id)}>
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 7l10 10M17 7L7 17" /></svg>
         </button>

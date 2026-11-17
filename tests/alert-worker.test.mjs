@@ -44,3 +44,19 @@ test('a malformed push still displays a generic visible notification', async () 
   assert.equal(w.shown.length, 1)
   assert.equal(w.shown[0][1].data.eventId, undefined)
 })
+
+test('a test push tells the open app that it arrived, without any market data', async () => {
+  const messages = []
+  const w = worker([{ url: 'https://example.com/trading/', postMessage: (value) => messages.push(value) }])
+  await w.dispatch('push', { data: { json: () => ({ type: 'push-test', title: 'x', body: 'y' }) } })
+  assert.equal(w.shown.length, 1)
+  assert.equal(w.shown[0][1].tag, 'trading-push-test')
+  assert.deepEqual(messages.map((message) => message.type), ['push-test:received'])
+})
+
+test('a price alert does not send the test arrival message', async () => {
+  const messages = []
+  const w = worker([{ url: 'https://example.com/trading/', postMessage: (value) => messages.push(value) }])
+  await w.dispatch('push', { data: { json: () => ({ type: 'price-alert', eventId: id, asset: { symbol: 'HBAR' }, target: 0.2, observedPrice: 0.21, currency: 'USD' }) } })
+  assert.deepEqual(messages, [])
+})

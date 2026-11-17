@@ -322,3 +322,152 @@ describe('PriceChart time axis', () => {
     expect(badgeTop + 18 < top || badgeTop > top + height).toBe(true)
   })
 })
+
+describe('PriceChart editing drawings', () => {
+  const trend = { id: 't1', kind: 'trend' as const, t1: candles[40].t, p1: 150, t2: candles[80].t, p2: 180 }
+  const hline = { id: 'h1', kind: 'hline' as const, t1: candles[50].t, p1: 160, t2: candles[50].t, p2: 160 }
+  function withDrawing(drawing: typeof trend | typeof hline) {
+    const chart = setup()
+    chart.rerender(<PriceChart {...chart.props} drawings={[drawing]} />)
+    const ends = () => Array.from(document.querySelectorAll('.mk-drawing circle:not(.mk-handle), .mk-drawing circle.mk-handle')).map((node) => ({ x: Number(node.getAttribute('cx')), y: Number(node.getAttribute('cy')) }))
+    const mouse = (type: 'pointerDown' | 'pointerMove' | 'pointerUp', x: number, y: number) =>
+      fireEvent[type](chart.hit(), { pointerId: 9, pointerType: 'mouse', button: 0, clientX: x, clientY: y })
+    return { ...chart, ends, mouse }
+  }
+
+  it('moves a whole trend line with the mouse and keeps its slope', () => {
+    const chart = withDrawing(trend)
+    const [a, b] = chart.ends()
+    const before = chart.picture()
+    chart.mouse('pointerDown', (a.x + b.x) / 2, (a.y + b.y) / 2)
+    chart.mouse('pointerMove', (a.x + b.x) / 2 + 40, (a.y + b.y) / 2 + 30)
+    // The line follows live, the chart itself does not pan.
+    expect(document.querySelector('.mk-drawing.is-dragged')).not.toBeNull()
+    expect(chart.picture()).toBe(before)
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+    chart.mouse('pointerUp', (a.x + b.x) / 2 + 40, (a.y + b.y) / 2 + 30)
+    expect(chart.onDrawingsChange).toHaveBeenCalledOnce()
+    const [moved] = chart.onDrawingsChange.mock.calls[0][0]
+    expect(moved.id).toBe('t1')
+    expect(moved.t1).toBeGreaterThan(trend.t1)
+    expect(moved.t2 - moved.t1).toBeCloseTo(trend.t2 - trend.t1, -3)
+    expect(moved.p1).toBeLessThan(trend.p1)
+    expect(moved.p2 - moved.p1).toBeCloseTo(trend.p2 - trend.p1, 6)
+  })
+
+  it('drags one end point by touch and leaves the other one where it is', () => {
+    const chart = withDrawing(trend)
+    const [, b] = chart.ends()
+    chart.touch('pointerDown', 1, b.x + 6, b.y + 4)
+    chart.touch('pointerMove', 1, b.x + 6, b.y - 40)
+    chart.touch('pointerUp', 1, b.x + 6, b.y - 40)
+    expect(chart.onDrawingsChange).toHaveBeenCalledOnce()
+    const [moved] = chart.onDrawingsChange.mock.calls[0][0]
+    expect(moved.t1).toBe(trend.t1)
+    expect(moved.p1).toBe(trend.p1)
+    expect(moved.p2).toBeGreaterThan(trend.p2)
+    expect(moved.t2).toBe(trend.t2)
+  })
+
+  it('selects a line on a tap without changing it or the chart', () => {
+    const chart = withDrawing(trend)
+    const [a, b] = chart.ends()
+    const before = chart.picture()
+    chart.touch('pointerDown', 1, (a.x + b.x) / 2, (a.y + b.y) / 2 + 2)
+    chart.touch('pointerUp', 1, (a.x + b.x) / 2, (a.y + b.y) / 2 + 2)
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+    expect(chart.picture()).toBe(before)
+    expect(document.querySelector('.mk-drawing.is-selected')).not.toBeNull()
+    expect(document.querySelectorAll('.mk-drawing circle.mk-handle')).toHaveLength(2)
+  })
+
+  it('moves a horizontal line up and down, and puts it back when a second finger starts a pinch', () => {
+    const chart = withDrawing(hline)
+    const y = Number(document.querySelector('.mk-drawing.is-hline line')!.getAttribute('y1'))
+    chart.touch('pointerDown', 1, 200, y + 5)
+    chart.touch('pointerMove', 1, 260, y + 50)
+    chart.touch('pointerDown', 2, 500, 200)
+    chart.touch('pointerUp', 1, 260, y + 50)
+    chart.touch('pointerUp', 2, 500, 200)
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+    expect(Number(document.querySelector('.mk-drawing.is-hline line')!.getAttribute('y1'))).toBeCloseTo(y, 5)
+
+    chart.touch('pointerDown', 3, 200, y - 4)
+    chart.touch('pointerMove', 3, 120, y - 60)
+    chart.touch('pointerUp', 3, 120, y - 60)
+    expect(chart.onDrawingsChange).toHaveBeenCalledOnce()
+    const [moved] = chart.onDrawingsChange.mock.calls[0][0]
+    expect(moved.p1).toBeGreaterThan(hline.p1)
+    expect(moved.p2).toBe(moved.p1)
+  })
+})
+
+describe('PriceChart ruler', () => {
+  it('measures straight up and down only, whatever the finger does sideways', () => {
+    const chart = setup('measure')
+    chart.touch('pointerDown', 1, 200, 100)
+    chart.touch('pointerMove', 1, 330, 220)
+    const [line] = Array.from(document.querySelectorAll('.mk-measure line'))
+    expect(line.getAttribute('x1')).toBe(line.getAttribute('x2'))
+    chart.touch('pointerUp', 1, 330, 220)
+    const [kept] = Array.from(document.querySelectorAll('.mk-measure line'))
+    expect(kept.getAttribute('x1')).toBe(kept.getAttribute('x2'))
+    expect(Number(kept.getAttribute('y2'))).toBeGreaterThan(Number(kept.getAttribute('y1')) + 100)
+    expect(document.querySelector('.mk-measure text')?.textContent).toMatch(/^−\d+\.\d\d% · −/)
+    expect(chart.onDrawingsChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('PriceChart axis swipes', () => {
+  const priceLabels = () => Array.from(document.querySelectorAll('text.mk-axis-text:not([text-anchor])')).map((node) => node.textContent)
+  const axis = (which: 'x' | 'y') => document.querySelector(`.mk-hit-axis.is-${which}`)!
+  const swipe = (which: 'x' | 'y', id: number, from: [number, number], to: [number, number]) => {
+    fireEvent.pointerDown(axis(which), { pointerId: id, pointerType: 'touch', button: 0, clientX: from[0], clientY: from[1] })
+    fireEvent.pointerMove(axis(which), { pointerId: id, pointerType: 'touch', clientX: to[0], clientY: to[1] })
+    fireEvent.pointerUp(axis(which), { pointerId: id, pointerType: 'touch', clientX: to[0], clientY: to[1] })
+  }
+  const tap = (which: 'x' | 'y', id: number, at: [number, number]) => swipe(which, id, at, at)
+
+  it('compresses and stretches the prices on the price axis; a double tap there makes them automatic again', () => {
+    const chart = setup()
+    const before = priceLabels()
+    const picture = chart.picture()
+    swipe('y', 1, [690, 120], [690, 220])
+    const compressed = priceLabels()
+    expect(compressed).not.toEqual(before)
+    const span = (labels: Array<string | null>) => Number(labels.at(-1)?.replace(/,/g, '')) - Number(labels[0]?.replace(/,/g, ''))
+    expect(Math.abs(span(compressed))).toBeGreaterThan(Math.abs(span(before)))
+    expect(chart.picture()).not.toBe(picture)
+    expect(screen.getByRole('button', { name: 'Reset view' }).className).toContain('is-changed')
+
+    // With a hand-set price axis a drag also moves the chart up and down.
+    const shifted = chart.picture()
+    chart.touch('pointerDown', 2, 300, 100)
+    chart.touch('pointerMove', 2, 300, 160)
+    chart.touch('pointerUp', 2, 300, 160)
+    expect(chart.picture()).not.toBe(shifted)
+
+    tap('y', 3, [690, 150])
+    tap('y', 4, [690, 151])
+    expect(priceLabels()).toEqual(before)
+    expect(chart.picture()).toBe(picture)
+  })
+
+  it('shows wider or more candles on the time axis and keeps the newest candle at the right edge', () => {
+    const chart = setup()
+    const before = chart.width()
+    const lastX = () => Number(chart.rects().at(-1)?.getAttribute('x')) + chart.width() / 2
+    const right = 720 - 62
+    swipe('x', 1, [300, 330], [380, 330])
+    expect(chart.width()).toBeGreaterThan(before)
+    // Still the two empty candle places of margin on the right, now just wider ones.
+    const step = (right - lastX()) / 2.5
+    expect(step).toBeGreaterThan(before)
+    expect(chart.width()).toBeCloseTo(Math.min(18, step * 0.68), 5)
+    swipe('x', 2, [380, 330], [200, 330])
+    expect(chart.width()).toBeLessThan(before)
+    tap('x', 3, [300, 330])
+    tap('x', 4, [301, 330])
+    expect(chart.width()).toBeCloseTo(before, 5)
+  })
+})

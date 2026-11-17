@@ -82,7 +82,7 @@ const copy = {
       trend: 'Anfang und Ende der Linie anklicken',
       hline: 'Auf die Höhe klicken, auf der die Linie liegen soll',
       fib: 'Tief und Hoch (oder umgekehrt) anklicken',
-      measure: 'Zwei Punkte anklicken, um Abstand und Veränderung zu messen',
+      measure: 'Senkrecht von einem Kurs zum anderen ziehen, um die Veränderung zu messen',
     } as Record<string, string>,
     chart: {
       open: 'O', high: 'H', low: 'L', close: 'S',
@@ -182,7 +182,7 @@ const copy = {
       trend: 'Click the start and the end of the line',
       hline: 'Click the price level for the line',
       fib: 'Click the low and the high (or the other way round)',
-      measure: 'Click two points to measure distance and change',
+      measure: 'Drag straight up or down from one price to another to measure the change',
     } as Record<string, string>,
     chart: {
       open: 'O', high: 'H', low: 'L', close: 'C',

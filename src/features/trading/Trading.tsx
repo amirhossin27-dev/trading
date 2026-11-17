@@ -275,7 +275,7 @@ export function Trading({ language, embedded = false, settingsControl }: { langu
                 <div className="mk-identity-text">
                   <h2 aria-label={`${asset.name} · ${asset.symbol}`}>{asset.symbol}</h2>
                   <p className="mk-head-name">
-                    <span className={`mk-live-dot${quote?.marketOpen === false ? ' is-closed' : ''}`} title={t.live} aria-hidden="true" />
+                    <span className={`mk-live-dot${quote?.marketOpen === false ? ' is-closed' : ''}`} title={marketState ?? t.live} aria-hidden="true" />
                     <span className="mk-head-title">{asset.name}</span>
                     {marketState && <span className="mk-market-state">· {marketState}</span>}
                   </p>

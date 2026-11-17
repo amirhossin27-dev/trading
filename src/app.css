@@ -48,6 +48,9 @@ a { color: var(--accent); }
 @media (max-width: 600px), (pointer: coarse) {
   /* Right under the status bar and down to just above the home indicator: no empty bands on the iPhone. */
   .standalone { padding: calc(4px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(6px, calc(env(safe-area-inset-bottom, 0px) - 14px)) max(12px, env(safe-area-inset-left, 0px)); }
+  /* Home Screen app: iOS frosts a band about half a status bar tall under the clock (59pt bar: blur down to about 88pt).
+     Start the header below it; in landscape there is no status bar and the inset is 0. */
+  @media (display-mode: standalone) { .standalone { padding-top: max(4px, calc(env(safe-area-inset-top, 0px) * 1.5 + 2px)); } }
   .is-embedded { padding: 0; }
   .panel { padding: 12px; border-radius: 14px; }
   .standalone input, .standalone select, .standalone textarea, .tr-overlay input { font-size: 16px; }
