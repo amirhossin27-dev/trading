@@ -7,7 +7,7 @@ button:disabled { opacity: .55; cursor: default; }
 input, select, textarea { padding: 10px 12px; max-width: 100%; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 a { color: var(--accent); }
-.standalone { box-sizing: border-box; display: flex; flex-direction: column; max-width: 1600px; height: 100vh; height: 100dvh; min-height: 0; margin: auto; padding: max(20px, env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px)); }
+.standalone { box-sizing: border-box; display: flex; flex-direction: column; max-width: 1600px; height: 100dvh; min-height: 480px; margin: auto; padding: calc(20px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px)); }
 .standalone > main { display: flex; flex: 1; min-width: 0; min-height: 0; }
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 18px; box-shadow: var(--shadow); }
 .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
@@ -39,11 +39,13 @@ a { color: var(--accent); }
 .app-settings-dialog .install-tip { margin-top: 16px; margin-bottom: 0; }
 .standalone, .mk-watch-list, .mk-picker-list { touch-action: pan-x pan-y; }
 @media (max-width: 600px), (pointer: coarse) {
-  /* Safe areas belong to the shell once; the chart card uses the remaining screen. */
-  .standalone { padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
-  .standalone:not(.is-embedded) .mk-card { padding: 8px; border: 0; border-radius: 0; box-shadow: none; }
+  .standalone { padding: calc(32px + env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
   .is-embedded { padding: 0; }
   .panel { padding: 12px; border-radius: 14px; }
   .standalone input, .standalone select, .standalone textarea, .tr-overlay input { font-size: 16px; }
+}
+@media (max-height: 520px) {
+  .standalone:not(.is-embedded) { height: auto; min-height: 100dvh; }
+  .standalone:not(.is-embedded) > main { min-height: 380px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
