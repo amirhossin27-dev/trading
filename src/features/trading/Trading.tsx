@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DragEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import './trading.css'
 import type { Language } from '../../types/platform'
 import { localeFor } from '../overview/overviewCopy'
 import { tradingCopy } from './tradingCopy'
-import { AssetPicker } from './AssetPicker'
+import { AssetLogo } from './AssetLogo'
 import { TradingDialog } from './TradingDialog'
+import { Watchlist } from './Watchlist'
 import { AlarmControls } from './AlarmControls'
 import type { AlertEvent } from './alertService'
 import { indicatorColors } from './indicatorColors'
@@ -17,7 +18,7 @@ import { assetById, assetDigits, marketAssets } from './marketAssets'
 import type { MarketAsset } from './marketAssets'
 import { lineRanges, loadQuotes, loadSeries, seriesSpec, timeframes } from './marketData'
 import type { ChartKind, LineRange, MarketSeries, Quote, Timeframe } from './marketData'
-import { indicatorIds, maxDrawingsPerMarket, maxTabs, readPrefs, writePrefs, updateMarketPrefs } from './marketPrefs'
+import { indicatorIds, maxDrawingsPerMarket, readPrefs, writePrefs, updateMarketPrefs } from './marketPrefs'
 import type { ChartView, Drawing, IndicatorId, MarketPrefs } from './marketPrefs'
 
 const quoteRefreshMs = 15_000
@@ -54,6 +55,12 @@ function useDismiss(open: boolean, onClose: () => void) {
   return ref
 }
 
+function KindIcon({ kind }: { kind: ChartKind }) {
+  return kind === 'line'
+    ? <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 17l5-6 4 3 4-7 5 5" /></svg>
+    : <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 4v3M7 17v3M17 3v4M17 15v5" /><rect x="5" y="7" width="4" height="10" rx="1" /><rect x="15" y="7" width="4" height="8" rx="1" /></svg>
+}
+
 function ToolIcon({ tool }: { tool: Tool | 'clear' }) {
   let shapes: ReactNode
   if (tool === 'cursor') shapes = <path d="M6 3.5l12 8-5.3 1.3L10.2 18z" />
@@ -73,20 +80,6 @@ function WatchlistLayer({ embedded, open, onClose, label, closeLabel, children }
   return embedded ? children : <TradingDialog open={open} onClose={onClose} label={label} closeLabel={closeLabel} className="mk-watch-overlay">{children}</TradingDialog>
 }
 
-const brandColors: Record<string, string> = {
-  BTC: '#f7931a', ETH: '#627eea', SOL: '#9945ff', XRP: '#2b3138', ADA: '#0a3fb8', DOGE: '#c2a633', BNB: '#d9a40a', HBAR: '#222222',
-  LINK: '#2a5ada', DOT: '#e6007a', AVAX: '#e84142', LTC: '#345d9d', TRX: '#eb0029', SHIB: '#e42d04', UNI: '#ff007a', POL: '#7b3fe4',
-}
-
-/** Round badge in front of a market: a known brand colour, otherwise a colour derived from the name. */
-function avatarColor(asset: MarketAsset) {
-  const brand = brandColors[asset.symbol]
-  if (brand) return brand
-  let hash = 0
-  for (const character of asset.symbol) hash = (hash * 31 + character.charCodeAt(0)) % 360
-  return `hsl(${hash} 52% 40%)`
-}
-
 /** A number with its sign, formatted like the price. */
 function signed(format: Intl.NumberFormat, value: number) {
   const text = format.format(Math.abs(value))
@@ -99,27 +92,21 @@ export function Trading({ language, embedded = false, settingsControl }: { langu
   const [prefs, setPrefs] = useState<MarketPrefs>(readPrefs)
   const [alertView, setAlertView] = useState<(ChartView & { event: AlertEvent }) | null>(null)
   const [tool, setTool] = useState<Tool>('cursor')
-  const [pickerOpen, setPickerOpen] = useState(false)
   const [indicatorsOpen, setIndicatorsOpen] = useState(false)
   const [watchOpen, setWatchOpen] = useState(false)
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
-  const [watchFilter, setWatchFilter] = useState('')
-  const [watchPage, setWatchPage] = useState(0)
   const [retryCount, setRetryCount] = useState(0)
   const [seriesState, setSeriesState] = useState<SeriesState>({ key: '', series: null, failed: false })
   const [quotes, setQuotes] = useState<Record<string, Quote>>({})
-  // Reordering the watchlist: the row that is dragged and the row it hovers (dropped before or after it).
-  const [drag, setDrag] = useState<{ id: string; overId: string | null; after: boolean } | null>(null)
-  const [moveNote, setMoveNote] = useState('')
-  const listRef = useRef<HTMLDivElement>(null)
+  // The rows of the list that are on screen: only their prices are requested.
+  const [visibleIds, setVisibleIds] = useState<string[]>([])
 
   // Everything the user sets up is saved right away, so a reload (or the next visit) shows the same view.
   useEffect(() => {
     writePrefs(prefs)
   }, [prefs])
 
-  const pickerRef = useDismiss(pickerOpen, () => setPickerOpen(false))
   const indicatorsRef = useDismiss(indicatorsOpen, () => setIndicatorsOpen(false))
   const optionsRef = useDismiss(optionsOpen, () => setOptionsOpen(false))
   const toolsRef = useDismiss(toolsOpen, () => setToolsOpen(false))
@@ -127,16 +114,14 @@ export function Trading({ language, embedded = false, settingsControl }: { langu
   // A market found with the search is built from the stored name on every lookup: keep one object, or every render would start a new request.
   const asset = useMemo(() => alertView?.event.asset ?? assetById(prefs.active, prefs.extras) ?? marketAssets[0], [alertView?.event.asset, prefs.active, prefs.extras])
   const chartView = alertView ?? prefs
-  const tabAssets = useMemo(() => prefs.tabs.map((id) => assetById(id, prefs.extras)).filter((item): item is MarketAsset => item !== undefined), [prefs.tabs, prefs.extras])
-  const filteredAssets = useMemo(() => {
-    const search = watchFilter.trim().toLocaleLowerCase(locale)
-    return search ? tabAssets.filter((item) => `${item.name} ${item.symbol}`.toLocaleLowerCase(locale).includes(search)) : tabAssets
-  }, [tabAssets, watchFilter, locale])
-  const pageCount = Math.max(1, Math.ceil(filteredAssets.length / 20))
-  const currentPage = Math.min(watchPage, pageCount - 1)
-  const visibleAssets = filteredAssets.slice(currentPage * 20, (currentPage + 1) * 20)
+  // A drawing tool belongs to one chart: another market starts with the cursor again.
+  const [toolAsset, setToolAsset] = useState(asset.id)
+  if (toolAsset !== asset.id) {
+    setToolAsset(asset.id)
+    setTool('cursor')
+  }
   // The prices do not depend on the order of the list: moving a row must not start new requests.
-  const marketKey = [...new Set([asset.id, ...(embedded || watchOpen ? visibleAssets.map((item) => item.id) : [])])].sort().join(',')
+  const marketKey = [...new Set([asset.id, ...(embedded || watchOpen ? visibleIds : [])])].sort().join(',')
   const quoteAssets = useMemo(() => marketKey.split(',').map((id) => id === asset.id ? asset : assetById(id, prefs.extras)).filter((item): item is MarketAsset => item !== undefined), [marketKey, prefs.extras, asset])
   const spec = seriesSpec(chartView.kind, chartView.range, chartView.timeframe, asset.source)
   const requestKey = `${asset.id}|${spec.interval}|${spec.limit}|${retryCount}`
@@ -155,7 +140,9 @@ export function Trading({ language, embedded = false, settingsControl }: { langu
   }
 
   function openAlarm(event: AlertEvent) {
-    pickAsset(event.asset)
+    // A saved market becomes the active one; any other market is only shown, not added to a list.
+    if (prefs.tabs.includes(event.asset.id)) update({ active: event.asset.id })
+    setWatchOpen(false)
     setOptionsOpen(false); setToolsOpen(false); setIndicatorsOpen(false)
     // Opening an alert is temporary; preserve the user's view until they deliberately change a control.
     setAlertView({ event, kind: 'candles', range: '1W', timeframe: 'auto' })
@@ -228,90 +215,8 @@ export function Trading({ language, embedded = false, settingsControl }: { langu
 
   function selectTab(id: string) {
     setAlertView(null)
-    setTool('cursor')
     update({ active: id })
     if (!embedded) setWatchOpen(false)
-  }
-
-  function pickAsset(picked: MarketAsset) {
-    setAlertView(null)
-    setPickerOpen(false)
-    if (!embedded) setWatchOpen(false)
-    setTool('cursor')
-    setPrefs((current) => {
-      if (current.tabs.includes(picked.id)) return updateMarketPrefs(current, { active: picked.id })
-      if (current.tabs.length >= maxTabs) return current
-      // A market from the search is remembered with its name; the quick picks are known anyway.
-      const extras = picked.source === 'yahoo' && assetById(picked.id) === undefined
-        ? { ...current.extras, [picked.id]: { symbol: picked.symbol, name: picked.name, group: picked.group } }
-        : current.extras
-      return updateMarketPrefs(current, { tabs: [...current.tabs, picked.id], extras, active: picked.id })
-    })
-  }
-
-  function closeTab(id: string) {
-    setPrefs((current) => {
-      if (current.tabs.length <= 1) return current
-      const index = current.tabs.indexOf(id)
-      const tabs = current.tabs.filter((item) => item !== id)
-      const active = current.active === id ? tabs[Math.min(index, tabs.length - 1)] : current.active
-      const extras = Object.fromEntries(Object.entries(current.extras).filter(([extraId]) => extraId !== id))
-      return updateMarketPrefs(current, { tabs, extras, active })
-    })
-    setTool('cursor')
-  }
-
-  /** Puts a market at the given place of the watchlist (`to` is its place after the move). */
-  function moveTab(id: string, to: number) {
-    setPrefs((current) => {
-      const from = current.tabs.indexOf(id)
-      const target = Math.max(0, Math.min(current.tabs.length - 1, to))
-      if (from < 0 || from === target) return current
-      const tabs = current.tabs.filter((item) => item !== id)
-      tabs.splice(target, 0, id)
-      return { ...current, tabs }
-    })
-  }
-
-  function dragOverRow(event: DragEvent<HTMLDivElement>, id: string) {
-    if (!drag || drag.id === id) return
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'move'
-    const rect = event.currentTarget.getBoundingClientRect()
-    // On a narrow card the list is a strip: the rows are side by side instead of one below the other.
-    const strip = event.currentTarget.parentElement !== null && window.getComputedStyle(event.currentTarget.parentElement).display === 'flex'
-    const after = strip ? event.clientX > rect.left + rect.width / 2 : event.clientY > rect.top + rect.height / 2
-    if (drag.overId !== id || drag.after !== after) setDrag({ ...drag, overId: id, after })
-  }
-
-  function dropRow() {
-    if (drag?.overId && drag.overId !== drag.id) {
-      const from = prefs.tabs.indexOf(drag.id)
-      const over = prefs.tabs.indexOf(drag.overId)
-      if (from >= 0 && over >= 0) {
-        const insertAt = over + (drag.after ? 1 : 0)
-        moveTab(drag.id, insertAt > from ? insertAt - 1 : insertAt)
-      }
-    }
-    setDrag(null)
-  }
-
-  /** Alt + arrow keys move the focused row, so the order can be changed without a mouse. */
-  function keyMoveRow(event: ReactKeyboardEvent<HTMLButtonElement>, tab: MarketAsset) {
-    const step = event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : 0
-    if (!event.altKey || step === 0) return
-    event.preventDefault()
-    const from = prefs.tabs.indexOf(tab.id)
-    const to = Math.max(0, Math.min(prefs.tabs.length - 1, from + step))
-    if (from < 0 || to === from) return
-    moveTab(tab.id, to)
-    if (!watchFilter.trim()) setWatchPage(Math.floor(to / 20))
-    setMoveNote(t.moved(tab.name, to + 1, prefs.tabs.length))
-    // The moved row is re-inserted into the page: give the focus back to it once it is in its new place.
-    window.requestAnimationFrame(() => {
-      const button = [...(listRef.current?.querySelectorAll<HTMLElement>('[data-market]') ?? [])].find((item) => item.dataset.market === tab.id)
-      button?.focus()
-    })
   }
 
   function toggleIndicator(id: IndicatorId) {
@@ -336,7 +241,9 @@ export function Trading({ language, embedded = false, settingsControl }: { langu
 
   const marketState = quote?.marketOpen === true ? t.marketOpen : quote?.marketOpen === false ? t.marketClosed : null
 
-  const priceFormats = (item: MarketAsset, reference: number) => priceFormatter(locale, reference, {}, assetDigits(item, reference))
+  const priceFormat = useMemo(() => priceFormatter(locale, price ?? 1, {}, digits), [locale, price, digits])
+  const absoluteChange = price !== null && baseline !== null ? price - baseline : null
+  const dayQuote = quote ? { tone: quote.changePct >= 0 ? 'up' : 'down', text: percent.format(quote.changePct / 100) } : null
 
   const kindControls = <div className="mk-seg" role="group" aria-label={t.kindLabel}>
     {(['line', 'candles'] as const).map((kind) => <button key={kind} type="button" className={chartView.kind === kind ? 'active' : ''} aria-pressed={chartView.kind === kind} onClick={() => chooseKind(kind)}>{t.kinds[kind]}</button>)}
@@ -364,19 +271,22 @@ export function Trading({ language, embedded = false, settingsControl }: { langu
           <div className="mk-main">
             <div className="mk-head">
               <div className="mk-identity">
-                <p className="eyebrow mk-eyebrow">
-                  <span className={`mk-live-dot${quote?.marketOpen === false ? ' is-closed' : ''}`} title={t.live} aria-hidden="true" />
-                  {t.eyebrow}
-                  {marketState && <span className="mk-market-state">· {marketState}</span>}
-                </p>
-                <h2>{asset.name} · {asset.symbol}</h2>
+                <AssetLogo asset={asset} size={embedded ? 40 : 36} className="mk-head-logo" />
+                <div className="mk-identity-text">
+                  <h2 aria-label={`${asset.name} · ${asset.symbol}`}>{asset.symbol}</h2>
+                  <p className="mk-head-name">
+                    <span className={`mk-live-dot${quote?.marketOpen === false ? ' is-closed' : ''}`} title={t.live} aria-hidden="true" />
+                    <span className="mk-head-title">{asset.name}</span>
+                    {marketState && <span className="mk-market-state">· {marketState}</span>}
+                  </p>
+                </div>
               </div>
               <div className="mk-price">
                 <strong>{price !== null ? money.format(price) : '—'}</strong>
-                {change !== null && <span className={`mk-change is-${trend}`} title={rangeName}>{percent.format(change)}</span>}
+                {change !== null && <span className={`mk-change is-${trend}`} title={rangeName}>{absoluteChange !== null && <span className="mk-change-abs">{signed(priceFormat, absoluteChange)}</span>} {percent.format(change)}</span>}
               </div>
               {!embedded && <button type="button" className="mk-watch-trigger" aria-label={`${t.openWatchlist} (${prefs.tabs.length})`} aria-haspopup="dialog" aria-expanded={watchOpen} onClick={() => { setWatchOpen(true); setOptionsOpen(false); setToolsOpen(false); setIndicatorsOpen(false) }}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M3 6h.1M3 12h.1M3 18h.1" /></svg><span>{prefs.tabs.length}</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" /></svg>
               </button>}
             </div>
 
@@ -428,7 +338,7 @@ export function Trading({ language, embedded = false, settingsControl }: { langu
 
             {!embedded && <div className="mk-bottom-bar">
               <div className="mk-menu" ref={optionsRef}>
-                <button type="button" className="mk-menu-button" aria-label={t.chartOptions} aria-expanded={optionsOpen} onClick={() => { setOptionsOpen((open) => !open); setToolsOpen(false); setIndicatorsOpen(false) }}>{t.kinds[chartView.kind]}<span aria-hidden="true">⌄</span></button>
+                <button type="button" className="mk-menu-button" aria-label={t.chartOptions} aria-expanded={optionsOpen} onClick={() => { setOptionsOpen((open) => !open); setToolsOpen(false); setIndicatorsOpen(false) }}><KindIcon kind={chartView.kind} /><span>{t.kinds[chartView.kind]}</span></button>
                 {optionsOpen && <div className="mk-popover mk-chart-options">
                   {kindControls}
                   {chartView.kind === 'candles' && <div className="mk-units" role="group" aria-label={t.kinds.candles}>
@@ -447,87 +357,29 @@ export function Trading({ language, embedded = false, settingsControl }: { langu
 
           </div>
 
-          <WatchlistLayer embedded={embedded} open={watchOpen} onClose={() => { setWatchOpen(false); setPickerOpen(false) }} label={t.watchlist} closeLabel={t.closeWatchlist}>
-          <aside className="mk-watch">
-            <div className="mk-watch-head" ref={pickerRef}>
-              <h3>{t.watchlist}</h3>
-              <button type="button" className="mk-add-button" aria-haspopup="dialog" aria-expanded={pickerOpen} aria-label={t.addTab} title={t.addTab} onClick={() => setPickerOpen((open) => !open)}>
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg>
-              </button>
-              {pickerOpen && <AssetPicker tabs={prefs.tabs} full={prefs.tabs.length >= maxTabs} onPick={pickAsset} onClose={() => setPickerOpen(false)} labels={t} />}
-            </div>
-            <input type="search" className="mk-watch-filter" aria-label={t.filterWatchlist} placeholder={t.filterWatchlist} value={watchFilter} onChange={(event) => { setWatchFilter(event.target.value); setWatchPage(0) }} />
-            <div
-              ref={listRef}
-              className="mk-watch-list"
-              role="tablist"
-              aria-orientation="vertical"
-              aria-label={t.tabsLabel}
-              onDragLeave={(event) => {
-                // Leaving the list: no row is the target any more.
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDrag((current) => (current ? { ...current, overId: null } : current))
-              }}
-            >
-              {visibleAssets.map((tab) => {
-                const row = quotes[tab.id]
-                const active = tab.id === asset.id
-                const tone = row ? (row.changePct >= 0 ? 'up' : 'down') : 'flat'
-                const formatPrice = row ? priceFormats(tab, row.price) : null
-                // the change in price terms follows from the price and the percentage
-                const absolute = row ? row.price - row.price / (1 + row.changePct / 100) : null
-                const dropClass = drag?.overId === tab.id ? (drag.after ? ' drop-after' : ' drop-before') : ''
-                return (
-                  <div
-                    key={tab.id}
-                    className={`mk-row${active ? ' active' : ''}${drag?.id === tab.id ? ' is-dragging' : ''}${dropClass}`}
-                    draggable={tabAssets.length > 1}
-                    onDragStart={(event) => {
-                      event.dataTransfer.effectAllowed = 'move'
-                      // Firefox only starts a drag when some data is set.
-                      event.dataTransfer.setData('text/plain', tab.id)
-                      setDrag({ id: tab.id, overId: null, after: false })
-                    }}
-                    onDragOver={(event) => dragOverRow(event, tab.id)}
-                    onDrop={(event) => {
-                      event.preventDefault()
-                      dropRow()
-                    }}
-                    onDragEnd={() => setDrag(null)}
-                  >
-                    <button
-                      type="button"
-                      role="tab"
-                      data-market={tab.id}
-                      aria-selected={active}
-                      aria-keyshortcuts={tabAssets.length > 1 ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
-                      aria-label={`${tab.name} (${tab.symbol})${row ? ` ${percent.format(row.changePct / 100)}` : ''}`}
-                      title={`${tab.name} · ${t.dayChange}${tabAssets.length > 1 ? ` · ${t.reorderHint}` : ''}`}
-                      onClick={() => selectTab(tab.id)}
-                      onKeyDown={(event) => keyMoveRow(event, tab)}
-                    >
-                      <span className="mk-avatar" style={{ background: avatarColor(tab) }} aria-hidden="true">{tab.symbol.replace(/[^A-Za-z0-9]/g, '').charAt(0)}</span>
-                      <b className="mk-row-symbol">{tab.symbol}</b>
-                      <span className="mk-row-price">{row && formatPrice ? formatPrice.format(row.price) : '–'}</span>
-                      <span className={`mk-row-abs is-${tone}`}>{absolute !== null && formatPrice ? signed(formatPrice, absolute) : ''}</span>
-                      <span className={`mk-row-pct is-${tone}`}>{row ? percent.format(row.changePct / 100) : ''}</span>
-                    </button>
-                    {tabAssets.length > 1 && (
-                      <button type="button" className="mk-row-close" aria-label={t.closeTab(tab.symbol)} title={t.closeTab(tab.symbol)} onClick={() => closeTab(tab.id)}>
-                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 7l10 10M17 7L7 17" /></svg>
-                      </button>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-            {filteredAssets.length === 0 && <p className="mk-picker-empty">{t.noResults}</p>}
-            {pageCount > 1 && <nav className="mk-watch-pages" aria-label={t.watchlist}>
-              <button type="button" aria-label={t.previousPage} disabled={currentPage === 0} onClick={() => setWatchPage(currentPage - 1)}>‹</button>
-              <span aria-live="polite">{t.page(currentPage + 1, pageCount)}</span>
-              <button type="button" aria-label={t.nextPage} disabled={currentPage === pageCount - 1} onClick={() => setWatchPage(currentPage + 1)}>›</button>
-            </nav>}
-            <p className="mk-visually-hidden" aria-live="polite">{moveNote}</p>
-          </aside>
+          <WatchlistLayer embedded={embedded} open={watchOpen} onClose={() => setWatchOpen(false)} label={t.watchlist} closeLabel={t.closeWatchlist}>
+            <Watchlist
+              prefs={prefs}
+              setPrefs={setPrefs}
+              quotes={quotes}
+              activeId={asset.id}
+              onSelect={selectTab}
+              onVisibleChange={setVisibleIds}
+              labels={t}
+              locale={locale}
+              overlay={!embedded}
+              footer={!embedded && (
+                <div className="mk-watch-footer">
+                  <button type="button" className="mk-current" aria-label={`${t.backToChart}: ${asset.name}`} onClick={() => setWatchOpen(false)}>
+                    <AssetLogo asset={asset} size={28} />
+                    <b>{asset.symbol}</b>
+                    <span className="mk-current-price">{price !== null ? priceFormat.format(price) : '–'}</span>
+                    {dayQuote && <span className={`mk-current-change is-${dayQuote.tone}`}>{dayQuote.text} {t.today}</span>}
+                    <span className="mk-current-go">{t.backToChart}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg></span>
+                  </button>
+                </div>
+              )}
+            />
           </WatchlistLayer>
         </div>
       </article>

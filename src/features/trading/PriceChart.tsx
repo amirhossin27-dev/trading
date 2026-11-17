@@ -34,6 +34,13 @@ const SUB_HEIGHT = { volume: 46, rsi: 62 }
 const MARGIN = 2
 const MIN_COUNT = 8
 const HIT_DISTANCE = 7
+/** A finger that rests this long (ms) without moving shows the crosshair instead of panning. */
+const HOLD_MS = 280
+/** Movement (px) that turns a touch into a pan before the hold time is up. */
+const SLOP = 8
+const DOUBLE_TAP_MS = 320
+/** Smallest gap (px) between two time labels. */
+const LABEL_GAP = 6
 
 interface View {
   count: number
@@ -49,6 +56,14 @@ interface Anchor {
 interface Pending {
   tool: Tool
   a: Anchor
+}
+
+interface Hold {
+  start: { x: number; y: number }
+  last: { x: number; y: number }
+  mode: 'wait' | 'pan' | 'cross'
+  sticky: boolean
+  timer: number
 }
 
 interface Layout {
@@ -212,19 +227,16 @@ interface SubPanelProps extends Layout {
   candles: Candle[]
   data: IndicatorData
   plotClipId: string
-  label: string
-  index: number
-  formatCompact: (value: number) => string
 }
 
-const SubPanel = memo(function SubPanel({ id, top, height, candles, from, to, step, plotW, data, plotClipId, label, index, formatCompact }: SubPanelProps) {
+/** Volume bars or the RSI line. Its value label is drawn by the chart, so a moving crosshair leaves this layer alone. */
+const SubPanel = memo(function SubPanel({ id, top, height, candles, from, to, step, plotW, data, plotClipId }: SubPanelProps) {
   const x = (position: number) => PAD_L + (position - from + 0.5) * step
   const start = Math.max(0, Math.floor(from))
   const end = Math.min(candles.length - 1, Math.ceil(to))
   const inner = { top: top + 14, height: height - 16 }
   const bodyWidth = Math.max(1, Math.min(18, step * 0.68))
   let content: ReactNode
-  let value: string
 
   if (id === 'volume') {
     let max = 0
@@ -236,13 +248,10 @@ const SubPanel = memo(function SubPanel({ id, top, height, candles, from, to, st
       bars.push(<rect key={candle.t} x={x(i) - bodyWidth / 2} y={inner.top + inner.height - barHeight} width={bodyWidth} height={Math.max(0, barHeight)} className={candle.c >= candle.o ? 'mk-vol is-up' : 'mk-vol is-down'} />)
     }
     content = bars
-    value = formatCompact(candles[Math.min(Math.max(index, 0), candles.length - 1)]?.v ?? 0)
   } else {
     const series = data.rsi ?? []
     const y = (v: number) => inner.top + ((100 - v) / 100) * inner.height
     const path = linePath(series, from, to, x, y)
-    const current = series[Math.min(Math.max(index, 0), series.length - 1)]
-    value = current === null || current === undefined ? '–' : current.toFixed(1)
     content = (
       <>
         {[30, 70].map((level) => <line key={level} x1={PAD_L} x2={PAD_L + plotW} y1={y(level)} y2={y(level)} className="mk-rsi-level" />)}
@@ -256,7 +265,6 @@ const SubPanel = memo(function SubPanel({ id, top, height, candles, from, to, st
   return (
     <g>
       <line x1={PAD_L} x2={PAD_L + plotW + AXIS_W} y1={top - GAP / 2} y2={top - GAP / 2} className="mk-panel-line" />
-      <text x={PAD_L + 6} y={top + 9} className="mk-panel-label">{label} <tspan className="mk-panel-value">{value}</tspan></text>
       <g clipPath={`url(#${plotClipId})`}>{content}</g>
     </g>
   )
@@ -284,6 +292,14 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   const touchPendingRef = useRef<Pending | null>(null)
   const touchBoxRef = useRef<DOMRect | null>(null)
   const pinchRef = useRef<{ distance: number; x: number; count: number; shift: number; plotW: number } | null>(null)
+  /**
+   * One finger in the cursor tool: it waits until it either moves (pan) or rests (crosshair). `sticky` is set when the crosshair
+   * from an earlier hold is still shown: then moving the finger moves the crosshair and a tap hides it.
+   */
+  const holdRef = useRef<Hold | null>(null)
+  const stickyRef = useRef(false)
+  const tapRef = useRef<{ x: number; y: number; time: number } | null>(null)
+  const hoverAtRef = useRef<(x: number) => number>(() => 0)
 
   // A half-finished drawing and the ruler disappear when another tool is chosen.
   if (lastTool !== tool) {
@@ -297,6 +313,8 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     touchBoxRef.current = null
     panRef.current = null
     downRef.current = null
+    stopHold()
+    stickyRef.current = false
     setPanning(false)
   }
 
@@ -332,6 +350,8 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   useEffect(() => {
     if (touchesRef.current.size || panRef.current) cancelInteraction()
   }, [size.w, size.h])
+
+  useEffect(() => () => stopHold(), [])
 
   // ---- geometry ----
   const panels: Array<{ id: 'volume' | 'rsi'; top: number; height: number }> = []
@@ -386,8 +406,10 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
 
   const axisFormats = useMemo(() => ({
     time: new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }),
-    day: new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit' }),
-    month: new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit' }),
+    date: new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short' }),
+    day: new Intl.DateTimeFormat(locale, { day: 'numeric' }),
+    month: new Intl.DateTimeFormat(locale, { month: 'short' }),
+    year: new Intl.DateTimeFormat(locale, { year: 'numeric' }),
   }), [locale])
   const fullTime = useMemo(() => {
     if (candleMs < day) return new Intl.DateTimeFormat(locale, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -472,7 +494,27 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     cancelInteraction()
   }
 
+  function stopHold() {
+    const hold = holdRef.current
+    if (hold) window.clearTimeout(hold.timer)
+    holdRef.current = null
+  }
+
+  /** Shows the crosshair at a finger, without moving the chart. */
+  function showCross(point: { x: number; y: number }) {
+    setPointer(point)
+    setHover(hoverAtRef.current(point.x))
+  }
+
+  function hideCross() {
+    stickyRef.current = false
+    setPointer(null)
+    setHover(null)
+  }
+
   function cancelInteraction() {
+    stopHold()
+    stickyRef.current = false
     touchesRef.current.clear()
     pinchRef.current = null
     multiTouchRef.current = false
@@ -495,6 +537,8 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
       touchesRef.current.set(event.pointerId, point)
       if (touchesRef.current.size >= 2) {
         if (touchesRef.current.size === 2) beginPinch()
+        stopHold()
+        stickyRef.current = false
         multiTouchRef.current = true
         touchPendingRef.current = null
         panRef.current = null
@@ -517,6 +561,21 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         }
         return
       }
+      const inMainArea = point.y >= PAD_T && point.y <= PAD_T + mainH
+      const hit = inMainArea && !stickyRef.current ? [...drawings].reverse().find((item) => hits(item, point.x, point.y)) : undefined
+      setSelectedId(hit?.id ?? null)
+      stopHold()
+      if (hit) return
+      const sticky = stickyRef.current
+      const hold: Hold = { start: point, last: point, mode: 'wait', sticky, timer: 0 }
+      hold.timer = sticky ? 0 : window.setTimeout(() => {
+        const current = holdRef.current
+        if (current !== hold || current.mode !== 'wait') return
+        current.mode = 'cross'
+        showCross(current.last)
+      }, HOLD_MS)
+      holdRef.current = hold
+      return
     }
     downRef.current = point
     const inMain = point.y >= PAD_T && point.y <= PAD_T + mainH
@@ -578,6 +637,31 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         setViewClamped({ count: nextCount, shift: count + MARGIN - nextFrom - nextCount })
         return
       }
+      const hold = holdRef.current
+      if (hold) {
+        hold.last = point
+        if (hold.mode === 'wait' && Math.hypot(point.x - hold.start.x, point.y - hold.start.y) > SLOP) {
+          window.clearTimeout(hold.timer)
+          if (hold.sticky) hold.mode = 'cross'
+          else {
+            hold.mode = 'pan'
+            // The chart follows the finger from where it first touched.
+            panRef.current = { x: hold.start.x, shift }
+            setPanning(true)
+          }
+        }
+        if (hold.mode === 'cross') {
+          showCross(point)
+          return
+        }
+      }
+      // No crosshair while a finger pans: it would jump around under the finger.
+      if (panRef.current) setViewClamped({ count: viewCount, shift: panRef.current.shift + (point.x - panRef.current.x) / step })
+      else if (tool !== 'cursor') {
+        setPointer(point)
+        setHover(hoverIndexAt(point.x))
+      }
+      return
     }
     setPointer(point)
     setHover(hoverIndexAt(point.x))
@@ -602,6 +686,30 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         capture(event, true)
         return
       }
+      const hold = holdRef.current
+      stopHold()
+      if (tool === 'cursor') {
+        touchBoxRef.current = null
+        downRef.current = null
+        panRef.current = null
+        setPanning(false)
+        capture(event, true)
+        if (hold?.mode === 'cross') {
+          // The crosshair stays where the finger left it; a tap hides it again.
+          stickyRef.current = true
+          return
+        }
+        hideCross()
+        if (hold?.mode === 'wait' && !hold.sticky) {
+          const now = Date.now()
+          const tap = tapRef.current
+          if (tap && now - tap.time < DOUBLE_TAP_MS && Math.hypot(point.x - tap.x, point.y - tap.y) < 30) {
+            tapRef.current = null
+            resetView()
+          } else tapRef.current = { x: point.x, y: point.y, time: now }
+        }
+        return
+      }
       const down = downRef.current
       const previousPending = touchPendingRef.current
       touchPendingRef.current = null
@@ -612,7 +720,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
       setPointer(null)
       setHover(null)
       capture(event, true)
-      if (!down || tool === 'cursor' || count < 2) return
+      if (!down || count < 2) return
       if (down.y < PAD_T || down.y > PAD_T + mainH || point.y < PAD_T || point.y > PAD_T + mainH) return
       const anchor = anchorAt(point)
       if (tool === 'hline') {
@@ -651,8 +759,9 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     }
   }
 
-  function handleLeave() {
-    if (panRef.current) return
+  function handleLeave(event: PointerEvent<SVGRectElement>) {
+    // A lifted finger also "leaves"; the touch crosshair is ended by a tap instead.
+    if (event.pointerType === 'touch' || panRef.current) return
     setPointer(null)
     setHover(null)
   }
@@ -688,6 +797,7 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   // Mouse wheel zooms around the pointer. React attaches wheel listeners as passive, so this one is added by hand.
   const wheelRef = useRef<(event: WheelEvent) => void>(() => undefined)
   useEffect(() => {
+    hoverAtRef.current = hoverIndexAt
     wheelRef.current = (event: WheelEvent) => {
       const rect = svgRef.current?.getBoundingClientRect()
       if (!rect || count < 2) return
@@ -704,18 +814,54 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
   }, [])
 
   // ---- render pieces ----
+  // ---- zoom buttons: a slim column over the price axis, at the bottom of the price pane ----
+  const zoomButton = clamp(Math.floor((mainH - 16) / 3), 24, 34)
+  const zoomH = zoomButton * 3 + 6
+  const lastY = last ? clamp(yOf(last.c), PAD_T + 9, PAD_T + mainH - 9) : null
+  const zoomLow = PAD_T + mainH - zoomH - 4
+  // The current price stays readable: when its badge sits where the buttons are, they move to the top.
+  const zoomTop = lastY !== null && lastY > zoomLow - 12 && lastY < zoomLow + zoomH + 12 ? PAD_T + 4 : zoomLow
+  const underZoom = (y: number) => y > zoomTop - 9 && y < zoomTop + zoomH + 9
+  const viewChanged = Math.abs(viewCount - (Math.min(visible, count) + MARGIN)) > 0.01 || shift > 0.01
+
   const priceTicks = niceTicks(lo, hi, Math.max(2, Math.floor(mainH / 48)))
-  const axis = timeTicks(indexToTime(times, from), indexToTime(times, to), Math.max(2, Math.floor(plotW / 96)))
-  const timeLabels = axis.ticks
-    .map((t) => ({ t, x: xOf(timeToIndex(times, t)) }))
-    // labels close to the edges would be cut off
-    .filter((tick) => tick.x > PAD_L + 24 && tick.x < PAD_L + plotW - 24)
-    .map((tick) => {
-      const date = new Date(tick.t)
-      const midnight = date.getHours() === 0 && date.getMinutes() === 0
-      const format = axis.unit === 'months' ? axisFormats.month : axis.unit === 'days' || midnight ? axisFormats.day : axisFormats.time
-      return { ...tick, label: format.format(date) }
-    })
+  const axis = timeTicks(indexToTime(times, from), indexToTime(times, to), Math.max(2, Math.floor(plotW / 42)))
+  const timeLabels = (() => {
+    const candidates = axis.ticks
+      .map((t) => {
+        const date = new Date(t)
+        const newDay = date.getHours() === 0 && date.getMinutes() === 0
+        const newMonth = newDay && date.getDate() === 1
+        const newYear = newMonth && date.getMonth() === 0
+        let label: string
+        let rank: number
+        if (newYear && axis.unit !== 'minutes') {
+          label = axisFormats.year.format(date)
+          rank = 3
+        } else if (axis.unit === 'months' || (axis.unit === 'days' && newMonth)) {
+          label = axisFormats.month.format(date)
+          rank = 2
+        } else if (axis.unit === 'days') {
+          label = axisFormats.day.format(date)
+          rank = 0
+        } else if (newDay) {
+          label = axisFormats.date.format(date)
+          rank = 1
+        } else {
+          label = axisFormats.time.format(date)
+          rank = 0
+        }
+        return { t, x: xOf(timeToIndex(times, t)), label, rank, half: label.length * 2.9 + 1 }
+      })
+      // labels close to the edges would be cut off
+      .filter((tick) => tick.x - tick.half > PAD_L + 2 && tick.x + tick.half < PAD_L + plotW - 2)
+    // Month and year labels win when two labels would touch.
+    const kept: typeof candidates = []
+    for (const tick of [...candidates].sort((a, b) => b.rank - a.rank || a.t - b.t)) {
+      if (kept.every((other) => Math.abs(other.x - tick.x) >= other.half + tick.half + LABEL_GAP)) kept.push(tick)
+    }
+    return kept.sort((a, b) => a.t - b.t)
+  })()
 
   const active = hover !== null ? Math.min(hover, count - 1) : count - 1
   const shown = candles[active]
@@ -816,6 +962,12 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
     return value === null || value === undefined ? '–' : fmt.format(value)
   }
   const seriesById: Record<'sma20' | 'sma50' | 'ema21', Series | null> = { sma20: data.sma20, sma50: data.sma50, ema21: data.ema21 }
+  const panelValue = (id: 'volume' | 'rsi') => {
+    if (id === 'volume') return formatCompact(shown?.v ?? 0)
+    const value = data.rsi?.[active]
+    return value === null || value === undefined ? '–' : value.toFixed(1)
+  }
+  const crossCoversZoom = crossPrice !== null && pointer !== null && underZoom(pointer.y)
 
   return (
     <div className={`mk-chart${tool !== 'cursor' ? ' is-drawing' : ''}${panning ? ' is-panning' : ''}`} ref={wrapRef}>
@@ -829,19 +981,22 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
           {priceTicks.map((tick) => (
             <g key={tick} pointerEvents="none">
               <line x1={PAD_L} x2={PAD_L + plotW} y1={yOf(tick)} y2={yOf(tick)} className="mk-grid" />
-              <text x={PAD_L + plotW + 8} y={yOf(tick) + 4} className="mk-axis-text">{fmt.format(tick)}</text>
+              {!underZoom(yOf(tick)) && <text x={PAD_L + plotW + 8} y={yOf(tick) + 4} className="mk-axis-text">{fmt.format(tick)}</text>}
             </g>
           ))}
           {timeLabels.map((tick) => (
             <g key={tick.t} pointerEvents="none">
               <line x1={tick.x} x2={tick.x} y1={PAD_T} y2={plotBottom} className="mk-grid is-vertical" />
-              <text x={tick.x} y={size.h - 6} textAnchor="middle" className="mk-axis-text">{tick.label}</text>
+              <text x={tick.x} y={size.h - 6} textAnchor="middle" className={`mk-axis-text${tick.rank > 0 ? ' is-major' : ''}`}>{tick.label}</text>
             </g>
           ))}
 
           {count >= 2 && <SeriesLayer {...layout} candles={candles} kind={kind} data={data} showBands={showBands} clipId={clipId} gradientId={gradientId} />}
           {panels.map((panel) => (
-            <SubPanel {...layout} key={panel.id} id={panel.id} top={panel.top} height={panel.height} candles={candles} data={data} plotClipId={plotClipId} label={panel.id === 'volume' ? labels.volume : labels.indicators.rsi} index={active} formatCompact={formatCompact} />
+            <g key={panel.id}>
+              <SubPanel {...layout} id={panel.id} top={panel.top} height={panel.height} candles={candles} data={data} plotClipId={plotClipId} />
+              <text x={PAD_L + 6} y={panel.top + 9} className="mk-panel-label">{panel.id === 'volume' ? labels.volume : labels.indicators.rsi} <tspan className="mk-panel-value">{panelValue(panel.id)}</tspan></text>
+            </g>
           ))}
 
           {last && (
@@ -912,10 +1067,14 @@ export function PriceChart({ candles, kind, visible, intervalMs: candleMs, indic
         </button>
       )}
 
-      <div className="mk-zoom" role="group">
-        <button type="button" onClick={() => zoom(1 / 1.4, PAD_L + plotW / 2)} aria-label={labels.zoomIn} title={labels.zoomIn}>+</button>
-        <button type="button" onClick={() => zoom(1.4, PAD_L + plotW / 2)} aria-label={labels.zoomOut} title={labels.zoomOut}>−</button>
-        <button type="button" onClick={resetView} aria-label={labels.zoomReset} title={labels.zoomReset}>
+      <div className={`mk-zoom${crossCoversZoom ? ' is-covered' : ''}`} role="group" style={{ top: zoomTop, height: zoomH, ['--zoom-button' as string]: `${zoomButton}px` }}>
+        <button type="button" onClick={() => zoom(1 / 1.4, PAD_L + plotW / 2)} aria-label={labels.zoomIn} title={labels.zoomIn}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 6v12M6 12h12" /></svg>
+        </button>
+        <button type="button" onClick={() => zoom(1.4, PAD_L + plotW / 2)} aria-label={labels.zoomOut} title={labels.zoomOut}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 12h12" /></svg>
+        </button>
+        <button type="button" className={viewChanged ? 'is-changed' : undefined} onClick={resetView} aria-label={labels.zoomReset} title={labels.zoomReset}>
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12a8 8 0 1 0 2.4-5.7" /><path d="M4 4v4.5h4.5" /></svg>
         </button>
       </div>

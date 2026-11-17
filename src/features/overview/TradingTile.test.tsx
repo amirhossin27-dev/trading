@@ -21,7 +21,7 @@ describe('TradingTile', () => {
   it('shows the first six crypto and stock entries in watchlist order, including custom stocks and full prices', async () => {
     writePrefs({
       ...defaultPrefs(),
-      tabs: ['yf:^GDAXI', 'btc', 'yf:CUSTOM', 'eth', 'yf:AAPL', 'hbar', 'sol', 'xrp'],
+      lists: [{ id: 'main', name: '', color: null, entries: ['yf:^GDAXI', 'btc', 'yf:CUSTOM', 'eth', { id: 's1', name: 'More' }, 'yf:AAPL', 'hbar', 'sol', 'xrp'] }],
       active: 'sol',
       extras: { 'yf:CUSTOM': { symbol: 'CUSTOM', name: 'Custom stock', group: 'stock' } },
     })
@@ -62,7 +62,7 @@ describe('TradingTile', () => {
   })
 
   it('explains how to populate the widget when the watchlist only contains other market types', () => {
-    writePrefs({ ...defaultPrefs(), tabs: ['yf:^GDAXI'], active: 'yf:^GDAXI' })
+    writePrefs({ ...defaultPrefs(), lists: [{ id: 'main', name: '', color: null, entries: ['yf:^GDAXI'] }], active: 'yf:^GDAXI' })
     render(<TradingTile language="de" onOpen={() => undefined} />)
     expect(screen.getByText('Füge im Trading-Modul Kryptos oder Aktien hinzu.')).toBeTruthy()
     expect(api.loadQuotes).not.toHaveBeenCalled()

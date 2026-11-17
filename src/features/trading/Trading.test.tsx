@@ -1,4 +1,4 @@
-import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Trading } from './Trading'
@@ -87,8 +87,9 @@ describe('Trading', () => {
     const dialog = screen.getByRole('dialog', { name: 'My markets' })
     expect(dialog.getAttribute('aria-modal')).toBe('true')
     expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Close markets' }))
+    expect(within(dialog).getByRole('tab', { name: /Hedera/ })).toBeTruthy()
     await user.keyboard('{Shift>}{Tab}{/Shift}')
-    expect(document.activeElement).toBe(within(dialog).getByRole('tab', { name: /Hedera/ }))
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Back to chart: Hedera' }))
     await user.tab()
     expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Close markets' }))
     expect(document.querySelector('.mk-chart')).toBe(chart)
@@ -126,36 +127,107 @@ describe('Trading', () => {
     expect(screen.getByRole('status').textContent).toContain('Anfang und Ende')
   })
 
-  it('returns to the chart after adding a market from the standalone picker', async () => {
+  it('keeps the standalone list open after adding a market and shows the new row', async () => {
     const user = userEvent.setup()
     render(<Trading language="en" />)
     await user.click(screen.getByRole('button', { name: /Open my markets/ }))
     await user.click(screen.getByRole('button', { name: 'Add market' }))
     await user.type(screen.getByRole('searchbox', { name: 'Search markets' }), 'bitcoin')
     await user.click(screen.getByRole('button', { name: /BTC\s+Bitcoin$/ }))
+    const dialog = screen.getByRole('dialog', { name: 'My markets' })
+    expect(within(dialog).queryByRole('searchbox', { name: 'Search markets' })).toBeNull()
+    const row = within(dialog).getByRole('tab', { name: /Bitcoin \(BTC\)/ })
+    expect(row.closest('.mk-row')?.className).toContain('is-new')
+    expect(screen.getByText('Bitcoin is now in “My markets”')).toBeTruthy()
+    // the chart still shows the market from before; the new one is a tap away
+    expect(screen.getByRole('heading', { level: 2, name: 'Hedera · HBAR' })).toBeTruthy()
+    expect(storedPrefs()).toMatchObject({ tabs: ['hbar', 'btc'], active: 'hbar' })
+    await user.click(within(dialog).getByRole('button', { name: 'Back to chart: Hedera' }))
     expect(screen.queryByRole('dialog', { name: 'My markets' })).toBeNull()
-    expect(screen.getByRole('heading', { name: 'Bitcoin · BTC' })).toBeTruthy()
   })
 
-  it('filters and pages a large watchlist while loading quotes only for the active and visible markets', async () => {
-    const extras = Object.fromEntries(Array.from({ length: 45 }, (_, index) => [`yf:TEST${index}`, { symbol: `TEST${index}`, name: `Test market ${index}`, group: 'stock' }]))
+  it('loads quotes only for the active market and the rows on screen, and draws a long list bit by bit', async () => {
+    const extras = Object.fromEntries(Array.from({ length: 149 }, (_, index) => [`yf:TEST${index}`, { symbol: `TEST${index}`, name: `Test market ${index}`, group: 'stock' }]))
     window.localStorage.setItem(storageKey, JSON.stringify({ tabs: ['hbar', ...Object.keys(extras)], active: 'hbar', extras, kind: 'line' }))
     const user = userEvent.setup()
     render(<Trading language="en" />)
     await waitFor(() => expect(document.querySelector('.mk-line')).toBeTruthy())
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/trading/quotes'))).toBe(false)
     await user.click(screen.getByRole('button', { name: /Open my markets/ }))
-    expect(screen.getAllByRole('tab')).toHaveLength(20)
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('TEST18'))).toBe(true))
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('TEST19'))).toBe(false)
-    await user.click(screen.getByRole('button', { name: 'Next page' }))
-    expect(screen.getAllByRole('tab')).toHaveLength(20)
-    expect(screen.getByRole('tab', { name: /Test market 19 \(TEST19\)/ })).toBeTruthy()
-    await user.type(screen.getByRole('searchbox', { name: 'Filter my markets' }), 'Test market 44')
-    expect(screen.getAllByRole('tab')).toHaveLength(1)
-    expect(screen.getByRole('tab', { name: /Test market 44/ })).toBeTruthy()
+    expect(screen.getAllByRole('tab')).toHaveLength(120)
+    // without IntersectionObserver the first 40 rows count as visible
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('TEST38'))).toBe(true))
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('TEST39'))).toBe(false)
+    await user.click(screen.getByRole('button', { name: 'Show 30 more' }))
+    expect(screen.getAllByRole('tab')).toHaveLength(150)
+    expect(screen.queryByRole('button', { name: /more$/ })).toBeNull()
     const quoteCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/trading/quotes'))
     expect(quoteCalls.every(([url]) => (new URL(String(url), 'http://localhost').searchParams.get('symbols') ?? '').split(',').length <= 20)).toBe(true)
+  })
+
+  it('asks for the prices of the rows that the browser reports on screen', async () => {
+    const observed: Element[] = []
+    let report: IntersectionObserverCallback = () => undefined
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) { report = callback }
+      observe(element: Element) { observed.push(element) }
+      disconnect() {}
+    })
+    const extras = Object.fromEntries(Array.from({ length: 30 }, (_, index) => [`yf:TEST${index}`, { symbol: `TEST${index}`, name: `Test market ${index}`, group: 'stock' }]))
+    window.localStorage.setItem(storageKey, JSON.stringify({ tabs: ['hbar', ...Object.keys(extras)], active: 'hbar', extras, kind: 'line' }))
+    render(<Trading language="en" embedded />)
+    await waitFor(() => expect(observed.length).toBeGreaterThan(30))
+    const row = observed.find((element) => (element as HTMLElement).dataset.marketRow === 'yf:TEST25')!
+    act(() => report([{ target: row, isIntersecting: true } as unknown as IntersectionObserverEntry], {} as IntersectionObserver))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('TEST25'))).toBe(true))
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('TEST3,') || String(url).endsWith('TEST3'))).toBe(false)
+  })
+
+  it('creates a colour list, a custom list and a section from the list menu', async () => {
+    window.localStorage.setItem(storageKey, JSON.stringify({ tabs: ['hbar', 'btc'], active: 'hbar', kind: 'line' }))
+    const user = userEvent.setup()
+    render(<Trading language="de" embedded />)
+    const bitcoin = await screen.findByRole('tab', { name: /Bitcoin/ })
+
+    // long press (or right click) on a row: the market gets a colour
+    fireEvent.contextMenu(bitcoin.closest('.mk-row')!)
+    const sheet = screen.getByRole('dialog', { name: 'Aktionen für BTC' })
+    await user.click(within(sheet).getByRole('button', { name: 'Rot' }))
+    expect(within(sheet).getByRole('button', { name: 'Rot' }).getAttribute('aria-pressed')).toBe('true')
+    await user.click(within(sheet).getByRole('button', { name: 'Schließen' }))
+    expect(bitcoin.closest('.mk-row')?.querySelector('.mk-row-flag.is-red')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Farbliste Rot, 1 Kurs' }))
+    expect(screen.getAllByRole('tab').map((tab) => tab.getAttribute('data-market'))).toEqual(['btc'])
+
+    // a new own list, renamed afterwards
+    await user.click(screen.getByRole('button', { name: 'Neue Liste' }))
+    await user.type(screen.getByRole('textbox', { name: 'Name der Liste' }), 'Dividenden')
+    await user.click(screen.getByRole('button', { name: 'Speichern' }))
+    expect(screen.getByRole('heading', { level: 3 }).textContent).toContain('Dividenden')
+    expect(screen.getByText(/Diese Liste ist noch leer/)).toBeTruthy()
+
+    // a section, then a market into it
+    await user.click(screen.getByRole('button', { name: 'Listenmenü' }))
+    await user.click(screen.getByRole('button', { name: 'Abschnitt hinzufügen' }))
+    await user.type(screen.getByRole('textbox', { name: 'Name des Abschnitts' }), 'Europa')
+    await user.click(screen.getByRole('button', { name: 'Speichern' }))
+    await user.click(screen.getByRole('button', { name: 'Listenmenü' }))
+    await user.click(screen.getByRole('button', { name: 'Liste bearbeiten' }))
+    await user.click(screen.getByRole('button', { name: 'Kurs zu Europa hinzufügen' }))
+    await user.click(screen.getByRole('button', { name: 'Aktien' }))
+    await user.click(screen.getByRole('button', { name: /SAP\.DE\s+SAP/ }))
+    expect(screen.getByRole('tablist', { name: 'Europa' })).toBeTruthy()
+    expect(within(screen.getByRole('tablist', { name: 'Europa' })).getByRole('tab', { name: /SAP/ })).toBeTruthy()
+    const stored = storedPrefs() as { lists: Array<{ name: string; color: string | null; entries: unknown[] }> }
+    expect(stored.lists.find((list) => list.name === 'Dividenden')?.entries).toEqual([expect.objectContaining({ name: 'Europa' }), 'yf:SAP.DE'])
+    expect(stored.lists.find((list) => list.color === 'red')?.entries).toEqual(['btc'])
+
+    // deleting the list keeps the markets in the other lists
+    await user.click(screen.getByRole('button', { name: 'Fertig' }))
+    await user.click(screen.getByRole('button', { name: 'Listenmenü' }))
+    await user.click(screen.getByRole('button', { name: 'Liste löschen' }))
+    await user.click(within(screen.getByRole('dialog', { name: '„Dividenden“ löschen?' })).getByRole('button', { name: 'Liste löschen' }))
+    expect((storedPrefs() as { lists: Array<{ name: string }> }).lists.some((list) => list.name === 'Dividenden')).toBe(false)
   })
 
   it('shows HBAR with its day change in the tab and a chart', async () => {
@@ -233,8 +305,12 @@ describe('Trading', () => {
     await user.click(screen.getByRole('button', { name: 'Remove BTC' }))
     expect(screen.queryByRole('tab', { name: /Bitcoin/ })).toBeNull()
     expect(screen.getByRole('tab', { name: /Hedera/ }).getAttribute('aria-selected')).toBe('true')
-    // the last tab cannot be closed
-    expect(screen.queryByRole('button', { name: 'Remove HBAR' })).toBeNull()
+    expect(screen.getByRole('heading', { level: 2, name: 'Hedera · HBAR' })).toBeTruthy()
+    // a list may be emptied; the chart keeps its market
+    await user.click(screen.getByRole('button', { name: 'Remove HBAR' }))
+    expect(screen.queryByRole('tab')).toBeNull()
+    expect(screen.getByText(/This list is empty/)).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: 'Hedera · HBAR' })).toBeTruthy()
   })
 
   it('adds a stock found with the search, shows its currency and market state, and keeps it after a reload', async () => {

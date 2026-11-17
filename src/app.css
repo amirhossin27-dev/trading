@@ -7,7 +7,11 @@ button:disabled { opacity: .55; cursor: default; }
 input, select, textarea { padding: 10px 12px; max-width: 100%; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 a { color: var(--accent); }
-.standalone { box-sizing: border-box; display: flex; flex-direction: column; max-width: 1600px; height: 100dvh; min-height: 480px; margin: auto; padding: calc(20px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px)); }
+/* The full screen. On the iPhone home screen (iOS 26) 100dvh misses the status bar (WebKit bug 301994): add it back, but never
+   beyond the large viewport, so the fix switches itself off once WebKit reports the full height. */
+.standalone { --app-height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; max-width: 1600px; height: var(--app-height); min-height: 480px; margin: auto; padding: calc(20px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px)); }
+@supports (height: 100dvh) { .standalone { --app-height: 100dvh; } }
+@supports (height: 100lvh) { .standalone { --app-height: min(100lvh, calc(100dvh + env(safe-area-inset-top, 0px))); } }
 .standalone > main { display: flex; flex: 1; min-width: 0; min-height: 0; }
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 18px; box-shadow: var(--shadow); }
 .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
@@ -19,6 +23,8 @@ a { color: var(--accent); }
 .is-embedded > main { display: block; }
 .is-embedded .panel { box-shadow: none; }
 .is-embedded .tr-page { height: 760px; min-height: 560px; }
+/* Narrow embed: the list sits under the chart, so the page grows and the dashboard follows its height. */
+@media (max-width: 920px) { .is-embedded .tr-page { height: auto; } }
 .is-compact .sp-list { max-height: 550px; overflow-y: auto; }
 .is-compact .panel { padding: 16px; }
 .is-compact .start-cal { border: 1px solid var(--border); border-radius: 14px; background: var(--panel); overflow: hidden; }
@@ -28,7 +34,8 @@ a { color: var(--accent); }
 .empty-state { color: var(--text-muted); padding: 20px; text-align: center; }
 .badge { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 6px; font-size: 11px; background: var(--accent-soft); }
 .app-settings-trigger { display: grid; place-items: center; flex: none; width: 44px; min-height: 44px; padding: 0; }
-.app-settings-trigger svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.app-settings-trigger svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.app-settings-label { display: none; }
 .app-settings-dialog .tr-overlay-panel { top: auto; left: 50%; right: auto; bottom: max(14px, env(safe-area-inset-bottom, 0px)); width: min(420px, calc(100vw - 24px)); max-height: calc(100dvh - 64px - env(safe-area-inset-top, 0px)); padding: 22px; border: 1px solid var(--border); border-radius: 20px; transform: translate(-50%, 120%); overflow-y: auto; }
 .app-settings-dialog.is-open .tr-overlay-panel { transform: translate(-50%, 0); }
 .app-settings-dialog .tr-dialog-close { top: 12px; }
@@ -39,7 +46,8 @@ a { color: var(--accent); }
 .app-settings-dialog .install-tip { margin-top: 16px; margin-bottom: 0; }
 .standalone, .mk-watch-list, .mk-picker-list { touch-action: pan-x pan-y; }
 @media (max-width: 600px), (pointer: coarse) {
-  .standalone { padding: calc(32px + env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
+  /* Right under the status bar and down to just above the home indicator: no empty bands on the iPhone. */
+  .standalone { padding: calc(4px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(6px, calc(env(safe-area-inset-bottom, 0px) - 14px)) max(12px, env(safe-area-inset-left, 0px)); }
   .is-embedded { padding: 0; }
   .panel { padding: 12px; border-radius: 14px; }
   .standalone input, .standalone select, .standalone textarea, .tr-overlay input { font-size: 16px; }

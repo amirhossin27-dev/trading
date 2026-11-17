@@ -225,3 +225,100 @@ describe('PriceChart gestures', () => {
     expect(chart.picture()).toBe(original)
   })
 })
+
+describe('PriceChart touch crosshair', () => {
+  afterEach(() => { vi.useRealTimers() })
+  const crossX = () => Number(document.querySelector('.mk-cross line')?.getAttribute('x1'))
+
+  it('pans on a quick drag without showing the crosshair', () => {
+    const chart = setup()
+    const before = chart.picture()
+    chart.touch('pointerDown', 1, 300)
+    chart.touch('pointerMove', 1, 304)
+    expect(chart.picture()).toBe(before)
+    chart.touch('pointerMove', 1, 360)
+    expect(chart.picture()).not.toBe(before)
+    expect(document.querySelector('.mk-cross')).toBeNull()
+    chart.touch('pointerUp', 1, 360)
+    expect(document.querySelector('.mk-chart.is-panning')).toBeNull()
+    expect(document.querySelector('.mk-cross')).toBeNull()
+  })
+
+  it('shows the crosshair after a hold, moves it without panning, keeps it after release and hides it on a tap', () => {
+    vi.useFakeTimers()
+    const chart = setup()
+    const before = chart.picture()
+    chart.touch('pointerDown', 1, 300, 120)
+    expect(document.querySelector('.mk-cross')).toBeNull()
+    act(() => { vi.advanceTimersByTime(300) })
+    expect(document.querySelector('.mk-cross')).not.toBeNull()
+    const first = crossX()
+    chart.touch('pointerMove', 1, 200, 150)
+    expect(crossX()).toBeLessThan(first)
+    expect(chart.picture()).toBe(before)
+    chart.touch('pointerUp', 1, 200, 150)
+    fireEvent.pointerLeave(chart.hit(), { pointerId: 1, pointerType: 'touch' })
+    expect(document.querySelector('.mk-cross')).not.toBeNull()
+
+    // A second drag moves the shown crosshair instead of the chart.
+    const kept = crossX()
+    chart.touch('pointerDown', 2, 200, 150)
+    chart.touch('pointerMove', 2, 280, 150)
+    expect(crossX()).toBeGreaterThan(kept)
+    expect(chart.picture()).toBe(before)
+    chart.touch('pointerUp', 2, 280, 150)
+    expect(document.querySelector('.mk-cross')).not.toBeNull()
+
+    chart.touch('pointerDown', 3, 100)
+    chart.touch('pointerUp', 3, 100)
+    expect(document.querySelector('.mk-cross')).toBeNull()
+  })
+
+  it('does not show the crosshair when a second finger starts a pinch during the hold', () => {
+    vi.useFakeTimers()
+    const chart = setup()
+    chart.touch('pointerDown', 1, 200)
+    chart.touch('pointerDown', 2, 462)
+    act(() => { vi.advanceTimersByTime(400) })
+    expect(document.querySelector('.mk-cross')).toBeNull()
+  })
+
+  it('resets the view on a double tap', () => {
+    const chart = setup()
+    const original = chart.picture()
+    fireEvent.wheel(chart.hit(), { deltaY: -100, clientX: 331 })
+    expect(chart.picture()).not.toBe(original)
+    expect(screen.getByRole('button', { name: 'Reset view' }).className).toContain('is-changed')
+    chart.touch('pointerDown', 1, 300)
+    chart.touch('pointerUp', 1, 300)
+    chart.touch('pointerDown', 2, 302)
+    chart.touch('pointerUp', 2, 302)
+    expect(chart.picture()).toBe(original)
+    expect(screen.getByRole('button', { name: 'Reset view' }).className).not.toContain('is-changed')
+  })
+})
+
+describe('PriceChart time axis', () => {
+  it('labels a day of 5 minute candles every few hours and names the new day', () => {
+    const start = new Date(2026, 0, 1, 12).getTime()
+    const day = Array.from({ length: 288 }, (_, i) => ({ t: start + i * 300_000, o: 100, h: 101, l: 99, c: 100, v: 1 }))
+    const chart = setup('cursor', day)
+    chart.unmount()
+    render(<PriceChart {...chart.props} visible={288} />)
+    const labels = Array.from(document.querySelectorAll('.mk-chart text.mk-axis-text[text-anchor="middle"]')).map((node) => node.textContent)
+    expect(labels.length).toBeGreaterThanOrEqual(6)
+    expect(labels).toContain('Jan 2')
+    expect(labels.some((label) => /^\d\d:00/.test(label ?? ''))).toBe(true)
+  })
+
+  it('keeps the zoom buttons over the price axis and away from the current price', () => {
+    setup()
+    const zoom = document.querySelector<HTMLElement>('.mk-zoom')!
+    expect(zoom.querySelectorAll('button')).toHaveLength(3)
+    const top = Number.parseFloat(zoom.style.top)
+    const price = document.querySelector('.mk-last .mk-badge rect')!
+    const badgeTop = Number(price.getAttribute('y'))
+    const height = Number.parseFloat(zoom.style.height)
+    expect(badgeTop + 18 < top || badgeTop > top + height).toBe(true)
+  })
+})
