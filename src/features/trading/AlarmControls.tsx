@@ -20,7 +20,14 @@ const messages: Record<string, [string, string]> = {
   unauthorized: ['Die Geräteverbindung konnte nicht bestätigt werden. Deine Alarme wurden nicht verändert.', 'This device connection could not be verified. Your alarms were not changed.'],
   alarm_limit: ['Für dieses Gerät sind bereits 100 Alarme gespeichert. Entferne zuerst einen alten Alarm.', 'This device already has 100 alarms. Remove an old alarm first.'],
   rate_limited: ['Zu viele Anfragen. Bitte warte kurz und versuche es erneut.', 'Too many requests. Wait briefly and try again.'],
+  timeout: ['Der Alarmdienst hat nicht rechtzeitig geantwortet. Bitte versuche es erneut.', 'The alarm service did not answer in time. Please try again.'],
+  test_not_received: ['Die Testmitteilung ist nach einer Minute nicht angekommen. Prüfe die Mitteilungseinstellungen und versuche es erneut.', 'The test notification did not arrive within a minute. Check notification settings and try again.'],
 }
+
+/** Answers after which waiting for the test notification makes no sense: it was certainly not sent. */
+const certainTestFailures = new Set(['subscription_required', 'subscription_conflict', 'unauthorized', 'rate_limited', 'server_not_configured', 'device_required', 'storage_unavailable'])
+/** How long the app waits for a test notification when the server could not confirm it in time. */
+const TEST_WAIT_MS = 60_000
 
 export function AlarmControls({ asset, currency, language, serviceUrl = alertServiceUrl(), onOpen }: {
   asset: MarketAsset; currency: string; language: Language; serviceUrl?: string; onOpen: (event: AlertEvent) => void
@@ -40,6 +47,9 @@ export function AlarmControls({ asset, currency, language, serviceUrl = alertSer
   const draftId = useRef<string | null>(null)
   const openRef = useRef(onOpen)
   const alive = useRef(true)
+  /** Set by the service worker's message once a test notification really reached this device. */
+  const testArrived = useRef(false)
+  const testTimer = useRef<number | null>(null)
   useEffect(() => { openRef.current = onOpen }, [onOpen])
   useEffect(() => { draftId.current = null }, [asset.id, target, direction, currency])
   const textError = useCallback((value: unknown) => {
@@ -100,6 +110,21 @@ export function AlarmControls({ asset, currency, language, serviceUrl = alertSer
     return () => { cancelled = true; navigator.serviceWorker?.removeEventListener('message', message) }
   }, [client, de, textError])
 
+  // The service worker reports a test notification it showed. That is the only certain proof of delivery:
+  // the server's answer can come late or fail although Apple already delivered the notification.
+  useEffect(() => {
+    const message = (event: MessageEvent) => {
+      if (event.data?.type !== 'push-test:received' || !alive.current) return
+      testArrived.current = true
+      if (testTimer.current !== null) { clearTimeout(testTimer.current); testTimer.current = null }
+      setError('')
+      setNotice(de ? 'Die Testmitteilung ist auf diesem Gerät angekommen.' : 'The test notification arrived on this device.')
+    }
+    navigator.serviceWorker?.addEventListener('message', message)
+    return () => navigator.serviceWorker?.removeEventListener('message', message)
+  }, [de])
+  useEffect(() => () => { if (testTimer.current !== null) clearTimeout(testTimer.current) }, [])
+
   const run = async (action: () => Promise<void>) => {
     if (busy) return
     setBusy(true); setError(''); setNotice('')
@@ -110,6 +135,36 @@ export function AlarmControls({ asset, currency, language, serviceUrl = alertSer
     // Start before the first await in run: notification permission must originate from this tap.
     const enrollment = enableAlarmNotifications(client, config.vapidPublicKey)
     void run(async () => { await enrollment; await refresh() })
+  }
+  const sendTest = () => {
+    if (!client) return
+    testArrived.current = false
+    if (testTimer.current !== null) { clearTimeout(testTimer.current); testTimer.current = null }
+    void run(async () => {
+      setNotice(de ? 'Testmitteilung wird gesendet …' : 'Sending test notification …')
+      try {
+        await client.testPush()
+        if (!testArrived.current) setNotice(de ? 'Die Testmitteilung ist unterwegs und sollte gleich erscheinen.' : 'The test notification is on its way and should appear shortly.')
+      } catch (value) {
+        // It already arrived: a late or failed server answer changes nothing.
+        if (testArrived.current) return
+        if (value instanceof AlertServiceError && certainTestFailures.has(value.code)) throw value
+        // A slow push service or a lost answer: the notification may still come. A dropped subscription ends the wait at once.
+        const state = await client.alarms().catch(() => null)
+        if (state && !state.subscriptionActive) {
+          setSubscribed(false)
+          throw value
+        }
+        if (testArrived.current) return
+        setNotice(de ? 'Der Alarmdienst hat den Versand nicht rechtzeitig bestätigt. Die App wartet bis zu einer Minute auf die Testmitteilung …' : 'The alarm service did not confirm delivery in time. The app waits up to a minute for the test notification …')
+        testTimer.current = window.setTimeout(() => {
+          testTimer.current = null
+          if (testArrived.current || !alive.current) return
+          setNotice('')
+          setError(messages.test_not_received[de ? 0 : 1])
+        }, TEST_WAIT_MS)
+      }
+    })
   }
   const create = (event: FormEvent) => {
     event.preventDefault()
@@ -156,7 +211,7 @@ export function AlarmControls({ asset, currency, language, serviceUrl = alertSer
           <p>{permissionDenied ? messages.permission_denied[de ? 0 : 1] : subscribed ? (de ? 'Mitteilungen sind für dieses Gerät verbunden.' : 'Notifications are connected for this device.') : (de ? 'Erlaube Mitteilungen, damit Alarme auch bei geschlossener App erscheinen.' : 'Allow notifications to receive alerts while the app is closed.')}</p>
           {!subscribed && <p>{de ? 'Auf dem iPhone: App über das Home-Bildschirm-Symbol öffnen.' : 'On iPhone: open the app from its Home Screen icon.'}</p>}
           <div className="alarm-row"><button type="button" disabled={busy || !config?.vapidPublicKey || !supportsPush()} onClick={enable}>{subscribed ? (de ? 'Mitteilungen neu verbinden' : 'Reconnect notifications') : (de ? 'Mitteilungen aktivieren' : 'Enable notifications')}</button>
-            {subscribed && <button type="button" disabled={busy} onClick={() => void run(async () => { await client.testPush(); setNotice(de ? 'Testmitteilung wurde zum Versand angenommen.' : 'Test notification accepted for delivery.') })}>{de ? 'Testmitteilung senden' : 'Send test notification'}</button>}</div>
+            {subscribed && <button type="button" disabled={busy} onClick={sendTest}>{de ? 'Testmitteilung senden' : 'Send test notification'}</button>}</div>
         </section>
         {config && !config.configured && <p className="alarm-error">{messages[config.code === 'server_not_configured' ? 'server_not_configured' : 'monitoring_not_ready'][de ? 0 : 1]}</p>}
         {config?.lastCheckedAt && <p className="alarm-small">{de ? 'Letzter abgeschlossener Prüflauf' : 'Last completed monitoring cycle'}: {date(config.lastCheckedAt)}</p>}

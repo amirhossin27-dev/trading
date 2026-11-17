@@ -86,7 +86,7 @@ export class AlertClient {
     } catch { /* No identity until browser storage works. */ }
     return null
   }
-  private async request<T>(path: string, method = 'GET', body?: unknown, publicRequest = false): Promise<T> {
+  private async request<T>(path: string, method = 'GET', body?: unknown, publicRequest = false, timeoutMs = 15_000): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (!publicRequest) {
       const device = this.device()
@@ -96,12 +96,15 @@ export class AlertClient {
     }
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 15_000)
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const response = await fetch(`${this.base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: 'omit', cache: 'no-store', redirect: 'error', signal: controller.signal })
       const result = await response.json()
       if (!response.ok) throw new AlertServiceError(typeof result.code === 'string' ? result.code : 'service_unavailable')
       return result as T
+    } catch (error) {
+      if (controller.signal.aborted) throw new AlertServiceError('timeout')
+      throw error
     } finally { clearTimeout(timer) }
   }
   async config(): Promise<AlertConfig> {
@@ -141,7 +144,8 @@ export class AlertClient {
   async remove(id: string): Promise<void> { await this.request(`/alarms/${encodeURIComponent(id)}`, 'DELETE') }
   async rearm(id: string): Promise<PriceAlarm> { return (await this.request<{ alarm: PriceAlarm }>(`/alarms/${encodeURIComponent(id)}/rearm`, 'POST', {})).alarm }
   async subscribe(subscription: PushSubscriptionJSON): Promise<void> { await this.request('/subscribe', 'POST', { subscription }) }
-  async testPush(): Promise<void> { await this.request('/test-push', 'POST', {}) }
+  /** Waits longer than other calls: the server only answers after Apple's or Google's push service did. */
+  async testPush(): Promise<void> { await this.request('/test-push', 'POST', {}, false, 30_000) }
 }
 
 export function supportsPush(): boolean { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && window.isSecureContext }

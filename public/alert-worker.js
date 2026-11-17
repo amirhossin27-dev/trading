@@ -17,6 +17,11 @@
         badge: new URL('icons/icon-192.png', self.registration.scope).href,
         data: priceAlert ? { eventId: data.eventId } : {},
       })
+      // The open app learns that the test really arrived on this device, whatever the server answered.
+      if (test) {
+        const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        for (const client of windows) client.postMessage({ type: 'push-test:received' })
+      }
     })())
   })
   self.addEventListener('notificationclick', (event) => {

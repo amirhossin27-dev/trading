@@ -63,6 +63,8 @@ Basis ist `.../functions/v1/trading-alerts`. JSON wird nicht gecacht. Browser d�
 | `POST /ack` | `{ eventId }` | `{ event }`, wiederholbar |
 | `POST /check` | nur Scheduler, `X-Scheduler-Secret` | Anzahl geprüfter Alarme, Beobachtungen und Zustellversuche |
 
+Testmitteilung in der App (17.11.2026): Der Push-Dienst kann die Mitteilung zustellen, bevor die Function antwortet, oder die Antwort kommt zu spät (Client-Zeitlimit 30 s, Push-Zeitlimit der Function 8 s). Deshalb meldet der Service Worker eine angezeigte Testmitteilung mit `postMessage({ type: 'push-test:received' })` an die offene App. Nur diese Meldung gilt als sichere Zustellung. Bei einer unklaren Server-Antwort wartet die App bis zu 60 s auf sie und zeigt erst danach einen Fehler; ist das Abonnement nicht mehr aktiv, sofort.
+
 `asset` entspricht dem bestehenden `MarketAsset`-Objekt der App. Yahoo: `id`, `source: "yahoo"`, `yahoo`, `symbol`, `name`, `group`. Krypto: `id`, `source: "binance"`, `pair`, `coingecko`, `symbol`, `name`, `group`. Namen und Symbole sind in der Länge begrenzt. Der Server akzeptiert keine Preisquellen-URLs vom Client. Krypto-Ziele verwenden wie die App USD/USDT; es gibt keine zusätzliche Währungsumrechnung.
 
 `direction` ist `above` (größer/gleich) oder `below` (kleiner/gleich). `target` ist eine endliche JSON-Zahl größer null bis maximal `1e15`. `currency` muss mit der Quelle übereinstimmen. Für wiederholte Erstellversuche sollte der Client dieselbe UUID in `id` schicken: dieselben Daten liefern denselben Alarm zurück, abweichende Daten einen Konflikt.
