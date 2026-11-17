@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { AssetLogo } from './AssetLogo'
 import { assetGroups, searchAssets, yahooAsset } from './marketAssets'
 import type { AssetGroup, MarketAsset } from './marketAssets'
 import { searchMarkets } from './tradingApi'
@@ -13,6 +14,8 @@ interface AssetPickerProps {
   onPick: (asset: MarketAsset) => void
   onClose: () => void
   labels: Labels
+  /** Full-screen layer over the list (phone) instead of a pop-up. */
+  sheet?: boolean
 }
 
 interface Found {
@@ -38,7 +41,7 @@ function toFound(row: MarketSearchResult): Found {
 }
 
 /** Searchable list of the quick picks plus a live search over every stock, fund and index; a market that is already open only switches to its tab. */
-export function AssetPicker({ tabs, full, onPick, onClose, labels }: AssetPickerProps) {
+export function AssetPicker({ tabs, full, onPick, onClose, labels, sheet = false }: AssetPickerProps) {
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
   const [filter, setFilter] = useState<'all' | AssetGroup>('all')
@@ -89,7 +92,14 @@ export function AssetPicker({ tabs, full, onPick, onClose, labels }: AssetPicker
   const pickable = (asset: MarketAsset) => !full || tabs.includes(asset.id)
 
   return (
-    <div className="mk-picker" role="dialog" aria-label={labels.searchLabel}>
+    <div className={`mk-picker${sheet ? ' is-sheet' : ''}`} role="dialog" aria-label={labels.searchLabel} onKeyDown={(event) => {
+      if (event.key !== 'Escape' || !sheet) return
+      // Escape leaves the search, not the whole list.
+      event.stopPropagation()
+      event.nativeEvent.stopImmediatePropagation()
+      onClose()
+    }}>
+      {sheet && <div className="mk-picker-head"><h4>{labels.addTab}</h4><button type="button" onClick={onClose}>{labels.done}</button></div>}
       <input
         ref={inputRef}
         type="search"
@@ -100,7 +110,7 @@ export function AssetPicker({ tabs, full, onPick, onClose, labels }: AssetPicker
         spellCheck={false}
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === 'Escape') onClose()
+          if (event.key === 'Escape' && !sheet) onClose()
           if (event.key === 'Enter' && visible.length > 0 && pickable(visible[0].asset)) onPick(visible[0].asset)
         }}
       />
@@ -120,8 +130,11 @@ export function AssetPicker({ tabs, full, onPick, onClose, labels }: AssetPicker
                 return (
                   <li key={asset.id}>
                     <button type="button" className={open ? 'is-open' : ''} disabled={!pickable(asset)} onClick={() => onPick(asset)}>
-                      <b>{asset.symbol}</b>{' '}
-                      <span>{asset.name}</span>
+                      <AssetLogo asset={asset} size={30} />
+                      <span className="mk-picker-text">
+                        <b>{asset.symbol}</b>{' '}
+                        <span>{asset.name}</span>
+                      </span>
                       {exchange && <small>{exchange}</small>}
                       {open && <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>}
                     </button>

@@ -266,10 +266,13 @@ export interface TimeTicks {
   unit: 'minutes' | 'days' | 'months'
 }
 
-const fixedSteps = [5 * minute, 15 * minute, 30 * minute, 60 * minute, 120 * minute, 180 * minute, 360 * minute, 720 * minute, day, 2 * day, 7 * day, 14 * day]
-const monthSteps = [1, 3, 6, 12, 24, 60]
+const fixedSteps = [5 * minute, 10 * minute, 15 * minute, 30 * minute, 60 * minute, 120 * minute, 180 * minute, 240 * minute, 360 * minute, 720 * minute, day, 2 * day, 7 * day, 14 * day]
+const monthSteps = [1, 2, 3, 6, 12, 24, 60]
 
-/** Axis ticks at round local times (full hours, midnights, Mondays, month starts), so they stay put while the chart rolls. */
+/**
+ * Axis ticks at round local times (full hours, midnights, Mondays, month starts), so they stay put while the chart rolls.
+ * Day ticks also mark the start of each month, so the labels can name the month there.
+ */
 export function timeTicks(start: number, end: number, maxCount: number): TimeTicks {
   const span = end - start
   if (!(span > 0) || maxCount < 1) return { ticks: [], unit: 'days' }
@@ -278,9 +281,24 @@ export function timeTicks(start: number, end: number, maxCount: number): TimeTic
     const offset = new Date(start).getTimezoneOffset() * minute
     // weeks and fortnights start on Monday (1 January 1970 was a Thursday)
     const base = fixed >= 7 * day ? 4 * day : 0
-    const ticks: number[] = []
-    for (let t = Math.ceil((start - offset - base) / fixed) * fixed + base + offset; t <= end; t += fixed) ticks.push(t)
-    return { ticks, unit: fixed < day ? 'minutes' : 'days' }
+    let ticks: number[] = []
+    for (let t = Math.ceil((start - offset - base) / fixed) * fixed + base + offset; t <= end; t += fixed) {
+      // Steps of whole days follow local midnights, also across a change of summer time.
+      if (fixed >= day) {
+        const date = new Date(t)
+        ticks.push(new Date(date.getFullYear(), date.getMonth(), date.getDate() + (date.getHours() >= 12 ? 1 : 0)).getTime())
+      } else ticks.push(t)
+    }
+    if (fixed > day) {
+      const first = new Date(start)
+      for (let month = new Date(first.getFullYear(), first.getMonth() + 1, 1); month.getTime() <= end; month = new Date(month.getFullYear(), month.getMonth() + 1, 1)) {
+        const t = month.getTime()
+        ticks = ticks.filter((tick) => Math.abs(tick - t) >= fixed * 0.6)
+        ticks.push(t)
+      }
+      ticks.sort((a, b) => a - b)
+    }
+    return { ticks: ticks.filter((tick) => tick >= start && tick <= end), unit: fixed < day ? 'minutes' : 'days' }
   }
   const months = monthSteps.find((step) => span / (step * 30.4375 * day) <= maxCount) ?? 60
   const first = new Date(start)

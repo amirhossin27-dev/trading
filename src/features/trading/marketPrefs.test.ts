@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { defaultPrefs, readPrefs, sanitizePrefs, storageKey, writePrefs, updateMarketPrefs } from './marketPrefs'
+import { colorListId, defaultPrefs, listColors, mainListId, readPrefs, sanitizePrefs, storageKey, withLists, writePrefs, updateMarketPrefs } from './marketPrefs'
 
 afterEach(() => window.localStorage.clear())
+
+/** Default preferences whose main list holds the given markets. */
+function withTabs(tabs: string[]) {
+  const base = defaultPrefs()
+  return withLists(base, base.lists.map((list) => (list.id === mainListId ? { ...list, entries: tabs } : list)))
+}
 
 describe('market preferences', () => {
   it('starts with HBAR and candles for one day at an automatic interval', () => {
@@ -11,8 +17,7 @@ describe('market preferences', () => {
 
   it('keeps the chosen time unit, tabs and drawings after a reload', () => {
     const prefs = {
-      ...defaultPrefs(),
-      tabs: ['hbar', 'btc'],
+      ...withTabs(['hbar', 'btc']),
       active: 'btc',
       kind: 'candles' as const,
       range: '3M' as const,
@@ -55,7 +60,7 @@ describe('market preferences', () => {
   })
 
   it('restores the chosen view for each market after switching and reloading', () => {
-    let prefs = { ...defaultPrefs(), tabs: ['hbar', 'btc'] }
+    let prefs = withTabs(['hbar', 'btc'])
     prefs = updateMarketPrefs(prefs, { range: '1Y' })
     prefs = updateMarketPrefs(prefs, { active: 'btc' })
     expect(prefs).toMatchObject({ active: 'btc', kind: 'candles', range: '1D', timeframe: 'auto' })
@@ -101,5 +106,48 @@ describe('market preferences', () => {
     expect(result.active).toBe('yf:NESN.SW')
     expect(result.drawings['yf:NESN.SW']).toHaveLength(1)
   })
-})
 
+  it('turns the older single list of tabs into "My markets" next to the seven empty colour lists', () => {
+    const result = sanitizePrefs({ tabs: ['hbar', 'btc'], active: 'btc' })
+    expect(result.lists.map((list) => list.id)).toEqual([mainListId, ...listColors.map(colorListId)])
+    expect(result.lists[0]).toEqual({ id: mainListId, name: '', color: null, entries: ['hbar', 'btc'] })
+    expect(result.lists.slice(1).every((list) => list.entries.length === 0)).toBe(true)
+    expect(result.activeList).toBe(mainListId)
+    expect(result.tabs).toEqual(['hbar', 'btc'])
+  })
+
+  it('keeps own lists with sections, gives each market one colour and drops broken entries', () => {
+    const result = sanitizePrefs({
+      lists: [
+        { id: 'main', name: 'Krypto', entries: ['hbar', { id: 's1', name: '  Coins   Top ', collapsed: true }, 'btc', 'btc', 'nope', { id: 'BAD ID', name: 'x' }, 42] },
+        { id: 'l2', name: 'x'.repeat(80), entries: ['eth'] },
+        { id: 'l2', name: 'duplicate', entries: [] },
+        { id: colorListId('red'), entries: ['btc', 'eth'] },
+        { id: colorListId('green'), name: 'Kaufen', entries: ['btc', 'sol'] },
+        { id: 'color:black', entries: ['hbar'] },
+        'junk',
+      ],
+      activeList: 'l2',
+      active: 'sol',
+    })
+    expect(result.lists.filter((list) => list.color === null).map((list) => list.id)).toEqual(['main', 'l2'])
+    expect(result.lists[0]).toEqual({ id: 'main', name: 'Krypto', color: null, entries: ['hbar', { id: 's1', name: 'Coins Top', collapsed: true }, 'btc'] })
+    expect(result.lists[1].name).toHaveLength(40)
+    const red = result.lists.find((list) => list.color === 'red')!
+    const green = result.lists.find((list) => list.color === 'green')!
+    expect(red.entries).toEqual(['btc', 'eth'])
+    // BTC is red already: the green list only keeps SOL.
+    expect(green).toMatchObject({ name: 'Kaufen', entries: ['sol'] })
+    expect(result.lists.filter((list) => list.color !== null)).toHaveLength(7)
+    expect(result.activeList).toBe('l2')
+    expect(result.active).toBe('sol')
+    expect(result.tabs).toEqual(['hbar', 'btc', 'eth', 'sol'])
+  })
+
+  it('keeps an emptied list empty instead of bringing HBAR back', () => {
+    const result = sanitizePrefs({ lists: [{ id: 'main', name: '', entries: [] }], active: 'hbar' })
+    expect(result.lists[0].entries).toEqual([])
+    expect(result.tabs).toEqual([])
+    expect(result.active).toBe('hbar')
+  })
+})
