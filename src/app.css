@@ -60,3 +60,63 @@ a { color: var(--accent); }
   .standalone:not(.is-embedded) > main { min-height: 380px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+.is-compact .start-trade {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: 36px minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 176px;
+}
+
+.is-compact .start-cal-band {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  background: light-dark(#2563eb, #38bdf8);
+  color: white;
+}
+
+.is-compact .start-trade-open {
+  flex: 1;
+  width: auto;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.is-compact .start-cal-band a {
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+
+.is-compact .start-cal-band a:hover,
+.is-compact .start-cal-band a:focus-visible {
+  background: rgb(255 255 255 / 22%);
+}
+
+.is-compact .start-cal-band svg { width: 16px; height: 16px; }
+
+.is-compact .start-trade-list {
+  display: grid;
+  grid-template-rows: repeat(6, minmax(0, 1fr));
+  align-content: stretch;
+  padding: 4px 14px;
+}
+
+.is-compact .start-trade-row { min-height: 0; }
