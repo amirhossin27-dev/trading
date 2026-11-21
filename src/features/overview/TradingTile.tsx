@@ -47,12 +47,12 @@ export function TradingTile({ language, onOpen }: { language: Language; onOpen: 
 
   return (
     <article className="start-cal start-trade" aria-label={`${t.title} · ${t.list}`}>
-      <header className="start-cal-band">
+      <div className="start-cal-band">
         <button type="button" className="start-trade-open" aria-label={t.open} title={t.open} onClick={onOpen}>{t.title}</button>
         <a href="./" target="_blank" rel="noopener noreferrer" aria-label={t.separate} title={t.separate}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" /></svg>
         </a>
-      </header>
+      </div>
       {assets.length > 0 ? (
         <ol className="start-trade-list" aria-label={t.list}>
           {assets.map((asset) => {
