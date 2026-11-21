@@ -12,8 +12,8 @@ import { localeFor } from './overviewCopy'
 const refreshMs = 30_000
 
 const copy = {
-  de: { title: 'Trading', open: 'Trading-Modul öffnen', list: 'Top 6 deiner Watchlist', day: 'Tagesänderung', empty: 'Füge im Trading-Modul Kryptos oder Aktien hinzu.' },
-  en: { title: 'Trading', open: 'Open the Trading module', list: 'Top 6 of your watchlist', day: 'Day change', empty: 'Add crypto or stocks in the Trading module.' },
+  de: { title: 'Trading', open: 'Trading-Modul öffnen', separate: 'Trading in neuem Tab öffnen', list: 'Top 6 deiner Watchlist', day: 'Tagesänderung', empty: 'Füge im Trading-Modul Kryptos oder Aktien hinzu.' },
+  en: { title: 'Trading', open: 'Open the Trading module', separate: 'Open Trading in a new tab', list: 'Top 6 of your watchlist', day: 'Day change', empty: 'Add crypto or stocks in the Trading module.' },
 }
 
 /** The first six crypto/stock entries in the user's Trading watchlist, in their saved order. */
@@ -47,10 +47,12 @@ export function TradingTile({ language, onOpen }: { language: Language; onOpen: 
 
   return (
     <article className="start-cal start-trade" aria-label={`${t.title} · ${t.list}`}>
-      <button type="button" className="start-cal-band start-trade-open" aria-label={t.open} title={t.open} onClick={onOpen}>
-        <span>{t.title}</span>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" /></svg>
-      </button>
+      <div className="start-cal-band">
+        <button type="button" className="start-trade-open" aria-label={t.open} title={t.open} onClick={onOpen}>{t.title}</button>
+        <a href="./" target="_blank" rel="noopener noreferrer" aria-label={t.separate} title={t.separate}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" /></svg>
+        </a>
+      </div>
       {assets.length > 0 ? (
         <ol className="start-trade-list" aria-label={t.list}>
           {assets.map((asset) => {

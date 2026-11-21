@@ -22,11 +22,11 @@ export function App() {
   // Referrer must agree with the explicitly supplied parent. No wildcard messages.
   try { if(new URL(document.referrer).origin!==options.parentOrigin)return } catch {return}
   const parentOrigin=options.parentOrigin
-  const report=()=>{const dialog=Boolean(document.querySelector('[role="dialog"]')); const height=dialog?1000:Math.max(240,Math.min(2200,Math.ceil(document.getElementById('root')?.scrollHeight || 600))); window.parent.postMessage({type:'standalone-app:resize',height},parentOrigin)}
+  const report=()=>{const dialog=Boolean(document.querySelector('[role="dialog"]')); const height=dialog?1000:Math.max(240,Math.min(2200,Math.ceil(document.getElementById('root')?.scrollHeight || 600))); window.parent.postMessage({type:'standalone-app:resize',height,hasOpenLink:compact},parentOrigin)}
   const resize=new ResizeObserver(report);resize.observe(document.getElementById('root')!);
   const mutations=new MutationObserver(report);mutations.observe(document.body,{subtree:true,childList:true});report()
   return()=>{resize.disconnect();mutations.disconnect()}
- },[embedded])
+ },[embedded,compact])
  return <div className={`standalone ${embedded?'is-embedded':''} ${compact?'is-compact':''}`}>
   {!embedded && <TradingDialog open={settingsOpen} onClose={()=>setSettingsOpen(false)} label={de?'Einstellungen':'Settings'} closeLabel={de?'Einstellungen schließen':'Close settings'} className="app-settings-dialog">
    <h2>{de?'Einstellungen':'Settings'}</h2>
